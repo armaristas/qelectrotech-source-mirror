@@ -16,7 +16,11 @@
 #include <QDialog>
 #include <QDir>
 #include <QFile>
+#include <QLabel>
+#include <QLineEdit>
+#include <QListWidget>
 #include <QPainter>
+#include <QPushButton>
 #include <QSignalSpy>
 #include <QTableWidget>
 #include <QTemporaryDir>
@@ -153,8 +157,12 @@ class tst_gneradortb : public QObject
         info.addValue("label", QString(200, 'L'));
         peer->setElementInformations(info);
         QTRY_VERIFY(!spy.isEmpty());
-        QCOMPARE(peer->actualLabel(),QString(200,'L'));
-        QTRY_VERIFY2(item.boundingRect().height() > before.height(),qPrintable(QString("before=%1 after=%2 rows=%3").arg(before.height()).arg(item.boundingRect().height()).arg(encode(rows(s)[0].values))));
+        QCOMPARE(peer->actualLabel(), QString(200, 'L'));
+        QTRY_VERIFY2(item.boundingRect().height() > before.height(),
+                     qPrintable(QString("before=%1 after=%2 rows=%3")
+                                    .arg(before.height())
+                                    .arg(item.boundingRect().height())
+                                    .arg(encode(rows(s)[0].values))));
         auto *cable = p.newCable();
         cable->setDesignation("W_NATIVE");
         cable->setCoreCount(2);
@@ -480,6 +488,165 @@ class tst_gneradortb : public QObject
         QCOMPARE(imported[0].toObject()["_manual"].toObject()["disp_ext"].toString(), QString("MANUAL:2"));
         QCOMPARE(cfg, config);
     }
+    void originalLayoutKeepsNativeEditingAndFiltering()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *s = spares(p, 26);
+        auto original = rows(s);
+        const int count = p.undoStack()->count();
+        for (int i = 0; i < original.size(); ++i)
+        {
+            auto d = original[i].before;
+            d.m_informations.addValue("manufacturer_reference", i == 14   ? "WPE 6"
+                                                                : i == 13 ? "WDU 6 BL"
+                                                                          : "WDU 35");
+            if (i == 14)
+                d.setTerminalType(ElementData::TTGround);
+            if (i % 3 == 0)
+                d.m_informations.addValue(key("disp_int"), QString("8M-%1:1").arg(i + 1));
+            if (i == 12)
+                d.m_informations.addValue(key("corte"), true, false);
+            if (i == 6)
+            {
+                d.m_informations.addValue(key("peine"), true, false);
+                d.m_informations.addValue(key("peine_grupo"), 6, false);
+            }
+            original[i].terminal->setSpareData(d);
+        }
+        s->setBridge({original[0].terminal, original[1].terminal});
+        QVector<QSharedPointer<RealTerminal>> group;
+        for (int i = 6; i < 12; ++i)
+            group << original[i].terminal;
+        s->setBridge(group);
+        openEditor(&p, s, nullptr);
+        QDialog *dialog = nullptr;
+        for (auto *widget : QApplication::topLevelWidgets())
+            if (widget->objectName() == "faramaxGNeradorTB")
+                dialog = qobject_cast<QDialog *>(widget);
+        QVERIFY(dialog);
+        QVERIFY(dialog->windowFlags() & Qt::WindowMaximizeButtonHint);
+        auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
+        auto *list = dialog->findChild<QListWidget *>("TBStripList");
+        auto *search = dialog->findChild<QLineEdit *>("TBSearch");
+        auto *apply = dialog->findChild<QPushButton *>("TBApply");
+        QVERIFY(table && list && search && apply);
+        QCOMPARE(list->count(), p.terminalStrip().size());
+        QCOMPARE(table->horizontalHeaderItem(0)->text(), QString("Corte"));
+        QCOMPARE(table->horizontalHeaderItem(10)->text(), QString("Nº\nBorna"));
+        QVERIFY(table->isColumnHidden(21));
+        const auto screenshot = qEnvironmentVariable("QET_TB_LAYOUT_PREVIEW");
+        if (!screenshot.isEmpty())
+        {
+            dialog->showNormal();
+            dialog->resize(1910, 1000);
+            QTest::qWait(100);
+            QVERIFY(dialog->grab().save(screenshot));
+        }
+        table->item(0, 10)->setText("51");
+        table->item(0, 14)->setText("MANUAL:9");
+        table->item(0, 4)->setText(QString::fromUtf8("Azul"));
+        const auto proposedColor=table->item(0,4)->data(Qt::UserRole+10).value<QColor>();
+        QCOMPARE(p.undoStack()->count(), count);
+        apply->click();
+        QCOMPARE(s->realTerminals()[0]->label(), QString("XT:51"));
+        QCOMPARE(rows(s)[0].values["disp_int"].toString(), QString("MANUAL:9"));
+        QVERIFY(s->realTerminals()[0]->color().isValid());
+        QCOMPARE(s->realTerminals()[0]->color(),proposedColor);
+        QCOMPARE(p.undoStack()->count(), count + 1);
+        p.undoStack()->undo();
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents();
+        QCOMPARE(rows(s)[0].values["num_borna"].toString(), QString("1"));
+        search->setText("XT");
+        QVERIFY(!table->isRowHidden(0));
+        search->setText("NOT_PRESENT");
+        QVERIFY(table->isRowHidden(0));
+        search->clear();
+        QCOMPARE(p.undoStack()->index(), count);
+        table->setCurrentCell(0, 0);
+        const auto rect = table->visualItemRect(table->item(0, 0));
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, rect.center());
+        QVERIFY(table->item(0, 0)->checkState() == Qt::Checked);
+        QVERIFY(!rows(s)[0].values["corte"].toBool());
+        apply->click();
+        QVERIFY(rows(s)[0].values["corte"].toBool());
+        const int undoIndex = p.undoStack()->index();
+        int other = -1;
+        for (int i = 0; i < list->count(); ++i)
+            if (list->item(i)->data(Qt::UserRole).toUuid() != s->uuid())
+                other = i;
+        QVERIFY(other >= 0);
+        list->setCurrentRow(other);
+        QCOMPARE(table->rowCount(), rows(p.terminalStrip()[other]).size());
+        QCOMPARE(p.undoStack()->index(), undoIndex);
+        dialog->close();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void sidebarExceptionsPreserveDraftsUntilNativeApply()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *s = p.terminalStrip().first();
+        auto r = wired(s).first();
+        auto *conductor = wire(r);
+        auto *peer = (conductor->terminal1->parentElement() == r.terminal->element() ? conductor->terminal2
+                                                                                     : conductor->terminal1)
+                         ->parentElement();
+        auto info = peer->elementInformations();
+        info.addValue("label", "UI_DEVICE:7");
+        info.addValue("formula", QString());
+        peer->setElementInformations(info);
+        openEditor(&p, s, nullptr);
+        QDialog *dialog = nullptr;
+        for (auto *widget : QApplication::topLevelWidgets())
+            if (widget->objectName() == "faramaxGNeradorTB")
+                dialog = qobject_cast<QDialog *>(widget);
+        QVERIFY(dialog);
+        auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
+        auto *pattern = dialog->findChild<QLineEdit *>("TBExceptionPattern");
+        auto *add = dialog->findChild<QPushButton *>("TBAddException");
+        auto *apply = dialog->findChild<QPushButton *>("TBApply");
+        QVERIFY(table && pattern && add && apply);
+        int index = -1;
+        auto initial = rows(s);
+        for (int i = 0; i < initial.size(); ++i)
+            if (initial[i].id == r.id)
+                index = i;
+        QVERIFY(index >= 0);
+        table->item(index, 14)->setText("PENDING:1");
+        pattern->setText("UI_DEVICE");
+        const int before = p.undoStack()->count();
+        QTest::keyClick(pattern, Qt::Key_Return);
+        QVERIFY(dialog->isVisible());
+        QCOMPARE(table->item(index, 14)->text(), QString("PENDING:1"));
+        QVERIFY(table->item(index, 5)->text().contains("UI_DEVICE:7"));
+        QCOMPARE(p.undoStack()->count(), before);
+        QVERIFY(settings(s).value("external_name_exceptions").toString().isEmpty());
+        apply->click();
+        QVERIFY(settings(s).value("external_name_exceptions").toString().contains("UI_DEVICE|EXT"));
+        QCOMPARE(rows(s)[index].values["disp_int"].toString(), QString("PENDING:1"));
+        p.undoStack()->undo();
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents();
+        QVERIFY(settings(s).value("external_name_exceptions").toString().isEmpty());
+        dialog->close();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void closingProjectDisposesSidebarEditor()
+    {
+        auto *project = new QETProject(fixture());
+        project->loadFolios();
+        openEditor(project, project->terminalStrip().first(), nullptr);
+        QPointer<QDialog> dialog;
+        for (auto *widget : QApplication::topLevelWidgets())
+            if (widget->objectName() == "faramaxGNeradorTB")
+                dialog = qobject_cast<QDialog *>(widget);
+        QVERIFY(dialog);
+        delete project;
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        QVERIFY(dialog.isNull());
+    }
     void previewAndEditorUseNativeRows()
     {
         QETProject p(fixture());
@@ -487,7 +654,16 @@ class tst_gneradortb : public QObject
         auto *s = p.terminalStrip().first();
         auto data = rows(s);
         QVERIFY(data.size() > 1);
-        for(int i=0;i<data.size();++i){data[i].values["num_borna"]=QString::number(i+1);data[i].values["posicion"]=QString("1-A%1").arg(i+1);data[i].values["modelo"]="BL";data[i].values["color"]="Auto";for(const auto &field:{"disp_int","disp_ext","cable_int","cable_ext","mang_int","mang_ext"})data[i].values[field]="";}
+        for (int i = 0; i < data.size(); ++i)
+        {
+            data[i].values["num_borna"] = QString::number(i + 1);
+            data[i].values["posicion"] = QString("1-A%1").arg(i + 1);
+            data[i].values["modelo"] = "BL";
+            data[i].values["color"] = "Auto";
+            for (const auto &field :
+                 {"disp_int", "disp_ext", "cable_int", "cable_ext", "mang_int", "mang_ext"})
+                data[i].values[field] = "";
+        }
         auto cfg = settings(s);
         cfg["enabled"] = true;
         data[0].values["corte"] = true;
@@ -528,6 +704,8 @@ class tst_gneradortb : public QObject
         QString screenshot = qEnvironmentVariable("QET_TB_EDITOR_PREVIEW");
         if (!screenshot.isEmpty())
         {
+            dialog->showNormal();
+            dialog->resize(1910, 1000);
             QTest::qWait(100);
             QVERIFY(dialog->grab().save(screenshot));
         }

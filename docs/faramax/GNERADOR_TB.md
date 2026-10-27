@@ -5,11 +5,19 @@ Integración C++/Qt de GNerador_TB v5.6 sobre `TerminalStrip`, `PhysicalTerminal
 ## Uso
 
 1. Abrir el gestor de borneros de QET y pulsar **GNerador TB** en su barra de herramientas.
-2. Seleccionar el bornero nativo. **Asignar / reagrupar bornas** utiliza la importación de QET para asignar bornas libres o cambiar de bornero según prefijo, instalación y localización. No reordena los borneros existentes.
-3. Revisar las 22 columnas, las comprobaciones y la vista previa. **Aplicar** incorpora los cambios al proyecto abierto con Deshacer/Rehacer.
+2. Seleccionar el bornero activo en el panel lateral, que muestra sus cantidades. **Herramientas de tabla → Asignar / reagrupar** utiliza la importación de QET para asignar bornas libres o cambiar de bornero según prefijo, instalación y localización. No reordena los borneros existentes.
+3. Revisar la tabla, los mensajes laterales y la vista previa. **Aplicar en QET** incorpora los cambios al proyecto abierto con Deshacer/Rehacer.
 4. **Insertar plan en folio** activa la presentación GNerador TB e inserta el plan nativo en el folio activo. Si ya hay un plan de ese bornero en ese folio, lo muestra sin duplicarlo. Los planes del mismo bornero comparten sus ajustes.
 
 La ventana es no modal: puede permanecer abierta mientras se modifica el esquema. Conserva los cambios pendientes y el texto que se está escribiendo; antes de aplicar comprueba si han cambiado los datos de la borna o la configuración en otra ventana.
+
+## Interfaz de referencia
+
+El editor se abre maximizado y puede restaurarse o redimensionarse. Mantiene el panel lateral del generador original: acciones principales, lista de borneros, excepciones EXT/INT, búsqueda y mensajes. La tabla usa el orden de columnas del original, con 21 columnas visibles por defecto. El tamaño del peine se muestra junto a su casilla y se ajusta en **Herramientas de tabla → Tamaño del peine**; su columna independiente puede mostrarse desde **Columnas**.
+
+Los colores identifican bornero/número, puentes y reservas (verde), peines (naranja), cortes y destinos múltiples (azul), duplicados (morado) y datos que revisar (rojo). La columna Color comparte las reglas y el bicolor del plano. Las casillas se accionan haciendo clic en su celda. Las herramientas de copiar, pegar, ordenar, mover y gestionar reservas están en el menú superior **Herramientas de tabla** y en el menú contextual.
+
+Las excepciones añadidas en el lateral recalculan la tabla como propuesta y conservan sus textos manuales pendientes. Se guardan con **Aplicar en QET** y pueden deshacerse. El selector lateral mantiene un bornero activo, con sus propios ajustes; la cabecera también informa de las cantidades totales del proyecto.
 
 ## Funciones de la referencia y adaptación nativa
 
@@ -26,7 +34,7 @@ La ventana es no modal: puede permanecer abierta mientras se modifica el esquema
 | Cortes | Dividen la representación en tramos manteniendo un único bornero nativo. |
 | Colores | Color nativo manual, bicolor, reglas por modelo y códigos de la configuración antigua. Admite los nombres HTML usados por v5.6. |
 | SHL | Pantallas por lado, rangos de bornas, nombres de manguera y varios rangos separados por `&`. La pantalla interna utiliza la propiedad de pantalla de QET; los datos adicionales se guardan en la borna. |
-| Presentación | Fuentes, tamaños, negritas, longitudes, orígenes, desplazamientos, marcos, línea de tierra y agrupación Normal/Compacta por lado. La ventana hereda el tema de QET. |
+| Presentación | Fuentes, tamaños, negritas, longitudes, orígenes, desplazamientos, marcos, línea de tierra y agrupación Normal/Compacta por lado. La ventana utiliza el tema azul de GNerador_TB, aplicado solo a este editor; el tema general de QET se conserva. |
 | Configuración | Importación/exportación JSON y almacenamiento de los ajustes con el bornero dentro del proyecto. |
 | Comprobaciones | Duplicados, huecos numéricos, destinos incompletos, ausencia de modelo, correspondencia PE/tierra, posición fuera de malla y reservas con conexiones. Son avisos de revisión; los cambios estructurales incompatibles se rechazan antes de modificar el proyecto. |
 | Excel e historial | XLSX del bornero actual, filas seleccionadas, todos los borneros o cambios desde la última exportación de esta sesión. Primeras 22 columnas compatibles con v5.6; añade UUID y procedencia manual. Importa también historiales de v5.6. |
@@ -50,6 +58,8 @@ La validación automatizada está en `tst_gneradortb`; el archivo `fixtures/gner
 
 ## Verificación realizada
 
-Windows, Qt 6.11.1 y MinGW 13.1: aplicación y traducciones compiladas; `--version` devuelve `0.200.1-dev` con salida 0. Las seis baterías de regresión pasan en 37,42 segundos. `tst_gneradortb` completa 15 comprobaciones sin fallos. Se han revisado las imágenes del editor y el plano y se ha abierto el XLSX exportado con openpyxl, verificando las 22 columnas compatibles más las dos columnas de identidad/procedencia, la hoja oculta y el tratamiento como texto de cadenas que empiezan por `=`.
+Windows, Qt 6.11.1 y MinGW 13.1: aplicación y traducciones compiladas; `--version` devuelve `0.200.1-dev` con salida 0. Las seis baterías de regresión pasan en 37,21 segundos. `tst_gneradortb` completa 18 comprobaciones sin fallos. Se han revisado las imágenes del editor y el plano y se ha abierto el XLSX exportado con openpyxl, verificando las 22 columnas compatibles más las dos columnas de identidad/procedencia, la hoja oculta y el tratamiento como texto de cadenas que empiezan por `=`.
 
 La prueba de destinos largos detectó que el contorno automático de `QPicture` omitía textos girados en este entorno. El dibujante calcula sus límites con las métricas de fuente y avisa al elemento gráfico antes de cambiar su geometría, para evitar recortes en pantalla y PDF. Falta contrastar las convenciones y la presentación sobre los proyectos reales del usuario.
+
+La revisión de interfaz incorpora pruebas de edición sobre el nuevo orden de columnas, coincidencia entre el color propuesto y el aplicado, casillas centradas, búsqueda y cambio de bornero sin modificar el proyecto, reglas EXT/INT con borradores pendientes y cierre del editor al destruir su proyecto. La captura de referencia se genera con datos sintéticos para la revisión visual.

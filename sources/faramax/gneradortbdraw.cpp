@@ -416,6 +416,7 @@ Cache *cache(TerminalStrip *strip)
     return result;
 }
 } // namespace
+QPair<QColor,QColor> terminalColors(const Row &row,const QJsonObject &config){return colors(row,config);}
 QRectF render(QPainter *painter, TerminalStrip *strip, const QVector<Row> &data, const QJsonObject &config)
 {
     const auto drawing = picture(strip, data, config);

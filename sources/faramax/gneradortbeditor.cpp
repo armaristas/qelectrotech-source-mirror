@@ -3,8 +3,10 @@
 #include "../TerminalStrip/UndoCommand/addterminaltostripcommand.h"
 #include "../TerminalStrip/physicalterminal.h"
 #include "../TerminalStrip/realterminal.h"
+#include "../TerminalStrip/terminalcolor.h"
 #include "../TerminalStrip/terminalstrip.h"
 #include "../TerminalStrip/terminalstripautoimport.h"
+#include "../TerminalStrip/terminalstripbridge.h"
 #include "../diagram.h"
 #include "../diagramview.h"
 #include "../projectview.h"
@@ -26,20 +28,28 @@
 #include <QDoubleSpinBox>
 #include <QFileDialog>
 #include <QFormLayout>
+#include <QFrame>
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QJsonDocument>
 #include <QLabel>
 #include <QLineEdit>
+#include <QListWidget>
 #include <QMenu>
 #include <QMessageBox>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QPlainTextEdit>
 #include <QPushButton>
+#include <QRegularExpression>
 #include <QSaveFile>
 #include <QScrollArea>
+#include <QScrollBar>
+#include <QSplitter>
+#include <QStyleOptionButton>
 #include <QStyledItemDelegate>
 #include <QTabWidget>
 #include <QTableWidget>
@@ -62,28 +72,37 @@ struct Column
     const char *title;
     int kind = 0;
 }; // text, bool, integer, read-only
-const QVector<Column> columns{{"posicion", "Posición", 3},
-                              {"tipo_borna", "Tipo borna"},
+const QVector<Column> columns{{"corte", "Corte", 1},
+                              {"posicion", "Posición", 3},
+                              {"tipo_borna", "Tipo\nBorna"},
+                              {"modelo", "Modelo\nBorna"},
+                              {"color", "Color"},
+                              {"disp_ext", "Disp.\nExt"},
+                              {"mang_ext", "Manguera\nExt"},
+                              {"cable_ext", "Cable\nExt"},
                               {"puente", "Puente", 1},
-                              {"disp_ext", "Dispositivo externo"},
-                              {"mang_ext", "Manguera externa"},
-                              {"cable_ext", "Cable externo"},
                               {"bornero", "Bornero", 3},
-                              {"num_borna", "Nº de borna"},
-                              {"cable_int", "Cable interno"},
-                              {"mang_int", "Manguera interna"},
-                              {"disp_int", "Dispositivo interno"},
-                              {"corte", "Corte", 1},
-                              {"modelo", "Modelo borna"},
-                              {"reserva", "Reserva", 1},
-                              {"nivel", "Nivel (0–3)", 2},
-                              {"shl_ext", "SHL externo", 1},
-                              {"mang_shl_ext", "Rango SHL externo"},
-                              {"shl_int", "SHL interno", 1},
-                              {"mang_shl_int", "Rango SHL interno"},
+                              {"num_borna", "Nº\nBorna"},
                               {"peine", "Peine", 1},
-                              {"peine_grupo", "Grupo peine", 2},
-                              {"color", "Color"}};
+                              {"cable_int", "Cable\nInt"},
+                              {"mang_int", "Manguera\nInt"},
+                              {"disp_int", "Disp.\nInt"},
+                              {"reserva", "Reserva", 1},
+                              {"nivel", "Nivel", 2},
+                              {"shl_ext", "SHL\nExt", 1},
+                              {"mang_shl_ext", "Rango\nSHL Ext"},
+                              {"shl_int", "SHL\nInt", 1},
+                              {"mang_shl_int", "Rango\nSHL Int"},
+                              {"peine_grupo", "Grupo\nPeine", 2}};
+int fieldColumn(const QString &field)
+{
+    for (int i = 0; i < columns.size(); ++i)
+        if (field == columns[i].field)
+            return i;
+    return -1;
+}
+constexpr int SwatchRole = Qt::UserRole + 10;
+constexpr int StripeRole = Qt::UserRole + 11;
 const QMap<QString, QString> captions{
     {"enabled", "Usar dibujo GNerador TB"},
     {"x_start", "Origen X"},
@@ -146,6 +165,85 @@ class Choices final : public QStyledItemDelegate
     mutable QPointer<QWidget> active;
     std::function<void()> finished;
     using QStyledItemDelegate::QStyledItemDelegate;
+    void paint(QPainter *painter, const QStyleOptionViewItem &option, const QModelIndex &index) const override
+    {
+        auto color = index.data(SwatchRole).value<QColor>();
+        if (color.isValid())
+        {
+            painter->save();
+            const auto box = option.rect.adjusted(1, 1, -1, -1);
+            painter->fillRect(box, color);
+            auto stripe = index.data(StripeRole).value<QColor>();
+            if (stripe.isValid())
+                painter->fillRect(QRect(box.center().x(), box.top(), box.width() / 2, box.height()), stripe);
+            painter->setPen(
+                QPen(option.state & QStyle::State_Selected ? QColor("#5ad7f7") : QColor("#8c9ca6"),
+                     option.state & QStyle::State_Selected ? 2 : 1));
+            painter->drawRect(box);
+            painter->restore();
+            return;
+        }
+        if (index.data(Qt::CheckStateRole).isValid())
+        {
+            QStyleOptionViewItem cell(option);
+            initStyleOption(&cell, index);
+            cell.features &= ~QStyleOptionViewItem::HasCheckIndicator;
+            cell.text.clear();
+            auto *style = option.widget ? option.widget->style() : QApplication::style();
+            style->drawControl(QStyle::CE_ItemViewItem, &cell, painter, option.widget);
+            const auto caption = index.data().toString();
+            const int size = 16;
+            QStyleOptionViewItem check(cell);
+            check.rect =
+                QRect(option.rect.center().x() - size / 2, option.rect.center().y() - size / 2, size, size);
+            if (!caption.isEmpty())
+                check.rect.moveRight(option.rect.right() - 5);
+            check.state &= ~(QStyle::State_On | QStyle::State_Off);
+            check.state |=
+                index.data(Qt::CheckStateRole).toInt() == Qt::Checked ? QStyle::State_On : QStyle::State_Off;
+            if (!(index.flags() & Qt::ItemIsUserCheckable))
+                check.state &= ~QStyle::State_Enabled;
+            style->drawPrimitive(QStyle::PE_IndicatorItemViewItemCheck, &check, painter, option.widget);
+            if (check.state & QStyle::State_On)
+            {
+                painter->save();
+                painter->setPen(QPen(QColor("#172b35"), 1.6));
+                painter->drawLine(check.rect.topLeft() + QPoint(3, 8), check.rect.topLeft() + QPoint(7, 12));
+                painter->drawLine(check.rect.topLeft() + QPoint(7, 12), check.rect.topLeft() + QPoint(13, 4));
+                painter->restore();
+            }
+            if (!caption.isEmpty())
+            {
+                painter->save();
+                painter->setPen(index.data(Qt::ForegroundRole).value<QBrush>().color());
+                painter->drawText(option.rect.adjusted(4, 0, -24, 0), Qt::AlignVCenter | Qt::AlignLeft,
+                                  caption);
+                painter->restore();
+            }
+            return;
+        }
+        QStyledItemDelegate::paint(painter, option, index);
+    }
+    bool editorEvent(QEvent *event, QAbstractItemModel *model, const QStyleOptionViewItem &option,
+                     const QModelIndex &index) override
+    {
+        if (index.data(Qt::CheckStateRole).isValid())
+        {
+            if (!(index.flags() & Qt::ItemIsUserCheckable))
+                return false;
+            if (event->type() == QEvent::MouseButtonRelease &&
+                static_cast<QMouseEvent *>(event)->button() == Qt::LeftButton)
+            {
+                return model->setData(index,
+                                      index.data(Qt::CheckStateRole).toInt() == Qt::Checked ? Qt::Unchecked
+                                                                                            : Qt::Checked,
+                                      Qt::CheckStateRole);
+            }
+            if (event->type() == QEvent::MouseButtonPress || event->type() == QEvent::MouseButtonDblClick)
+                return true;
+        }
+        return QStyledItemDelegate::editorEvent(event, model, option, index);
+    }
     QWidget *createEditor(QWidget *parent, const QStyleOptionViewItem &option,
                           const QModelIndex &index) const override
     {
@@ -189,7 +287,13 @@ class Editor final : public QDialog
 {
     QPointer<QETProject> project;
     QPointer<TerminalStrip> strip;
-    QComboBox *strips = nullptr;
+    QComboBox *strips = nullptr; // Native active-strip identity, shared by sidebar and commands.
+    QListWidget *stripList = nullptr;
+    QListWidget *exceptions = nullptr;
+    QLineEdit *exceptionInput = nullptr;
+    QComboBox *exceptionSide = nullptr;
+    QLabel *tableSummary = nullptr;
+    QPlainTextEdit *messages = nullptr;
     QTableWidget *table = nullptr;
     QLabel *status = nullptr;
     QLineEdit *search = nullptr;
@@ -212,36 +316,200 @@ class Editor final : public QDialog
         setAttribute(Qt::WA_DeleteOnClose);
         setWindowTitle(QStringLiteral("GNerador TB · Gestor de borneros"));
         setObjectName("faramaxGNeradorTB");
-        resize(1250, 820);
-        auto *layout = new QVBoxLayout(this);
-        auto *bar = new QToolBar(this);
-        layout->addWidget(bar);
+        setWindowFlags(windowFlags() | Qt::WindowMinMaxButtonsHint);
+        resize(1600, 900);
+        setMinimumSize(1000, 650);
+        setStyleSheet(QStringLiteral(R"CSS(
+QDialog#faramaxGNeradorTB { background:#071b24; color:#eaf7ff; font-family:'Segoe UI'; font-size:12px; }
+QWidget { color:#eaf7ff; font-family:'Segoe UI'; font-size:12px; }
+QFrame#TBLeft, QFrame#TBWork { background:#0b2534; border:1px solid #25465a; border-radius:6px; }
+QLabel { background:transparent; }
+QLabel#TBTitle { font-size:15px; font-weight:700; }
+QLabel#TBSection { font-weight:700; }
+QLabel#TBTableSummary { color:#8db4c6; font-size:11px; }
+QPushButton { background:#102b3c; border:1px solid #2d5264; border-radius:6px; padding:6px 8px; font-weight:600; }
+QPushButton:hover { background:#15384d; border-color:#5ad7f7; }
+QPushButton:disabled { color:#64818e; }
+QPushButton#TBRefresh { background:#198bd2; border-color:#6bd6f4; }
+QPushButton#TBApply { background:#df8500; border-color:#f6bd50; }
+QPushButton#TBInsert { background:#299b68; border-color:#54c68e; }
+QPushButton#TBClose { background:#3c1f22; border-color:#75383e; }
+QLineEdit,QPlainTextEdit,QListWidget,QComboBox,QDoubleSpinBox { background:#081a24; color:#eaf7ff; border:1px solid #25465a; border-radius:4px; padding:4px; selection-background-color:#146a94; }
+QListWidget::item { min-height:26px; padding:1px 3px; }
+QListWidget::item:selected { background:#146a94; }
+QTableWidget { background:#071820; alternate-background-color:#0d2634; color:#eaf7ff; gridline-color:#1d3d50; selection-background-color:#146a94; selection-color:white; border:1px solid #25465a; font-size:11px; }
+QHeaderView { background:#102b3c; }
+QHeaderView::section { background:#102b3c; color:#d9eef8; border:1px solid #25465a; padding:4px; font-weight:700; font-size:11px; }
+QTableCornerButton::section { background:#102b3c; border:1px solid #25465a; }
+QTableView::indicator { width:16px; height:16px; border:1px solid #64818e; border-radius:4px; background:#132f3a; }
+QTableView::indicator:checked { background:#e68bec; border-color:#ecb5ef; image:none; }
+QToolBar { background:#0b2534; border:0; spacing:3px; }
+QToolButton { background:#102b3c; border:1px solid #25465a; border-radius:3px; padding:4px; }
+QToolButton:hover { background:#146a94; }
+QTabWidget::pane { border:0; }
+QTabBar::tab { background:#102b3c; color:#8db4c6; padding:5px 10px; }
+QTabBar::tab:selected { color:white; border-bottom:2px solid #42b883; }
+QMenu { background:#0b2534; color:#eaf7ff; border:1px solid #25465a; }
+QMenu::item:selected { background:#146a94; }
+QScrollBar:vertical,QScrollBar:horizontal { background:#081a24; border:0; }
+QScrollBar::handle:vertical,QScrollBar::handle:horizontal { background:#25465a; border-radius:4px; min-height:24px; min-width:24px; }
+QSplitter::handle { background:#071b24; }
+QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
+)CSS"));
+        auto *layout = new QHBoxLayout(this);
+        layout->setContentsMargins(6, 6, 6, 6);
+        layout->setSpacing(6);
+        auto *splitter = new QSplitter(Qt::Horizontal, this);
+        layout->addWidget(splitter);
+        auto *side = new QFrame(splitter);
+        side->setObjectName("TBLeft");
+        side->setMinimumWidth(225);
+        side->setMaximumWidth(340);
+        auto *left = new QVBoxLayout(side);
+        left->setContentsMargins(7, 7, 7, 7);
+        left->setSpacing(5);
+        auto *title = new QLabel(QStringLiteral("GNerador_TB · QET"), side);
+        title->setObjectName("TBTitle");
+        left->addWidget(title);
+        auto button = [this, left, side](const QString &label, const char *name, auto action)
+        {
+            auto *b = new QPushButton(label, side);
+            b->setObjectName(name);
+            left->addWidget(b);
+            connect(b, &QPushButton::clicked, this, action);
+            return b;
+        };
+        button(QStringLiteral("Actualizar desde QET"), "TBRefresh",
+               [this]()
+               {
+                   if (dirty() || delegate->active)
+                   {
+                       status->setText(
+                           QStringLiteral("Aplica o descarta los cambios pendientes antes de actualizar."));
+                       return;
+                   }
+                   populate(strip ? strip->uuid() : QUuid());
+               });
+        button(QStringLiteral("Aplicar en QET"), "TBApply",
+               [this]()
+               {
+                   apply();
+               });
+        button(QStringLiteral("Insertar plan en folio"), "TBInsert",
+               [this]()
+               {
+                   insert();
+               });
+        button(QStringLiteral("Guardar Excel / historial"), "TBExcel",
+               [this]()
+               {
+                   workbook();
+               });
+        button(QStringLiteral("Configuración"), "TBConfig",
+               [this]()
+               {
+                   tabs->setCurrentIndex(1);
+               });
+        button(QStringLiteral("Cerrar"), "TBClose",
+               [this]()
+               {
+                   close();
+               });
+        left->addWidget(new QLabel(QStringLiteral("Borneros encontrados:"), side));
         strips = new QComboBox(this);
-        strips->setMinimumWidth(210);
-        bar->addWidget(strips);
-        search = new QLineEdit(this);
-        search->setPlaceholderText(QStringLiteral("Buscar en el bornero…"));
-        bar->addWidget(search);
-        bar->addAction(QStringLiteral("Asignar / reagrupar bornas"), this,
-                       [this]()
-                       {
-                           if (!cleanForAction())
-                               return;
-                           TerminalStripAutoImport::importFreeTerminals(project, true);
-                           populate(strips->currentData().toUuid());
-                       });
-        bar->addAction(QStringLiteral("Aplicar"), this,
-                       [this]()
-                       {
-                           apply();
-                       });
-        bar->addAction(QStringLiteral("Insertar plan en folio"), this,
-                       [this]()
-                       {
-                           insert();
-                       });
+        strips->hide();
+        stripList = new QListWidget(side);
+        stripList->setObjectName("TBStripList");
+        stripList->setMinimumHeight(100);
+        left->addWidget(stripList, 2);
+        connect(stripList, &QListWidget::currentRowChanged, this,
+                [this](int row)
+                {
+                    if (loading || row < 0)
+                        return;
+                    strips->setCurrentIndex(row);
+                    if (strips->currentIndex() != row)
+                    {
+                        QSignalBlocker block(stripList);
+                        stripList->setCurrentRow(strips->currentIndex());
+                    }
+                });
+        left->addWidget(new QLabel(QStringLiteral("Excepciones EXT/INT:"), side));
+        auto *entry = new QHBoxLayout;
+        exceptionInput = new QLineEdit(side);
+        exceptionInput->setObjectName("TBExceptionPattern");
+        exceptionInput->setPlaceholderText(QStringLiteral("XCC*, DGA, PT100…"));
+        entry->addWidget(exceptionInput, 1);
+        exceptionSide = new QComboBox(side);
+        exceptionSide->addItems({"EXT", "INT"});
+        entry->addWidget(exceptionSide);
+        left->addLayout(entry);
+        button(QStringLiteral("Añadir excepción"), "TBAddException",
+               [this]()
+               {
+                   addException();
+               });
+        exceptions = new QListWidget(side);
+        exceptions->setObjectName("TBExceptions");
+        exceptions->setMaximumHeight(110);
+        left->addWidget(exceptions, 1);
+        auto *removeException = new QPushButton(QStringLiteral("Quitar excepción seleccionada"), side);
+        left->addWidget(removeException);
+        connect(removeException, &QPushButton::clicked, this,
+                [this]()
+                {
+                    if (exceptions->currentRow() < 0)
+                        return;
+                    delete exceptions->takeItem(exceptions->currentRow());
+                    saveExceptions();
+                });
+        connect(exceptionInput, &QLineEdit::returnPressed, this,
+                [this]()
+                {
+                    addException();
+                });
+        left->addWidget(new QLabel(QStringLiteral("Buscar:"), side));
+        search = new QLineEdit(side);
+        search->setObjectName("TBSearch");
+        search->setPlaceholderText(QStringLiteral("Filtrar tabla (cualquier columna)…"));
+        left->addWidget(search);
+        left->addWidget(new QLabel(QStringLiteral("Mensajes:"), side));
+        messages = new QPlainTextEdit(side);
+        messages->setObjectName("TBMessages");
+        messages->setReadOnly(true);
+        messages->setMinimumHeight(130);
+        left->addWidget(messages, 3);
+        auto *work = new QFrame(splitter);
+        work->setObjectName("TBWork");
+        auto *right = new QVBoxLayout(work);
+        right->setContentsMargins(7, 7, 7, 7);
+        right->setSpacing(4);
+        auto *heading = new QHBoxLayout;
+        auto *caption = new QLabel(QStringLiteral("Tabla de bornas"), work);
+        caption->setObjectName("TBSection");
+        heading->addWidget(caption);
+        tableSummary = new QLabel(work);
+        tableSummary->setObjectName("TBTableSummary");
+        tableSummary->setTextInteractionFlags(Qt::TextSelectableByMouse);
+        heading->addWidget(tableSummary, 1, Qt::AlignRight);
+        right->addLayout(heading);
+        splitter->setStretchFactor(0, 0);
+        splitter->setStretchFactor(1, 1);
+        splitter->setSizes({240, 1360});
         auto *tools = new QToolBar(this);
-        layout->addWidget(tools);
+        tools->hide();
+        auto *editMenu = new QMenu(this);
+        auto *editButton = new QPushButton(QStringLiteral("Herramientas de tabla"), work);
+        editButton->setMenu(editMenu);
+        heading->addWidget(editButton);
+        tools->addAction(QStringLiteral("Asignar / reagrupar"), this,
+                         [this]()
+                         {
+                             if (!cleanForAction())
+                                 return;
+                             TerminalStripAutoImport::importFreeTerminals(project, true);
+                             populate(strips->currentData().toUuid());
+                         });
         tools->addAction(QStringLiteral("Añadir reserva"), this,
                          [this]()
                          {
@@ -291,6 +559,21 @@ class Editor final : public QDialog
                          {
                              expand();
                          });
+        tools->addAction(
+            QStringLiteral("Tamaño del peine…"), this,
+            [this]()
+            {
+                const int row = table->currentRow();
+                if (row < 0)
+                    return;
+                bool accepted = false;
+                const int count = QInputDialog::getInt(
+                    this, QStringLiteral("Peine"),
+                    QStringLiteral("Número de bornas consecutivas del mismo nivel"),
+                    qMax(2, data[row].values.value("peine_grupo").toInt()), 2, 10000, 1, &accepted);
+                if (accepted)
+                    table->item(row, fieldColumn("peine_grupo"))->setText(QString::number(count));
+            });
         tools->addAction(QStringLiteral("Ordenar"), this,
                          [this]()
                          {
@@ -349,22 +632,31 @@ class Editor final : public QDialog
                          });
         auto *columnMenu = new QMenu(this);
         auto *columnButton = tools->addAction(QStringLiteral("Columnas"));
-        connect(columnButton, &QAction::triggered, this,
-                [columnMenu, tools]()
-                {
-                    columnMenu->exec(tools->mapToGlobal(QPoint(0, tools->height())));
-                });
+        columnButton->setMenu(columnMenu);
+        editMenu->addActions(tools->actions());
         status = new QLabel(this);
         status->setWordWrap(true);
-        layout->addWidget(status);
+        left->insertWidget(7, status);
+        status->setMaximumHeight(72);
         tabs = new QTabWidget(this);
-        layout->addWidget(tabs);
+        right->addWidget(tabs, 1);
         table = new QTableWidget(this);
         table->setObjectName("gneradorTBTable");
+        table->setContextMenuPolicy(Qt::ActionsContextMenu);
+        table->addActions(tools->actions());
         table->setColumnCount(columns.size());
         table->setAlternatingRowColors(true);
+        table->setWordWrap(false);
+        table->verticalHeader()->setDefaultSectionSize(30);
+        table->horizontalHeader()->setMinimumHeight(50);
+        const QVector<int> widths{50, 70, 84, 85,  58, 100, 74, 74, 58, 67, 64,
+                                  58, 74, 74, 105, 64, 52,  58, 76, 58, 76, 68};
+        for (int c = 0; c < widths.size(); ++c)
+            table->setColumnWidth(c, widths[c]);
+        table->setColumnHidden(fieldColumn("peine_grupo"), true);
         table->setSelectionMode(QAbstractItemView::ExtendedSelection);
         table->horizontalHeader()->setSectionResizeMode(QHeaderView::Interactive);
+        table->horizontalHeader()->setStretchLastSection(true);
         delegate = new Choices(table);
         delegate->finished = [this]()
         {
@@ -402,10 +694,10 @@ class Editor final : public QDialog
         QStringList headers;
         for (int c = 0; c < columns.size(); ++c)
         {
-            headers << QString::fromUtf8(columns[c].title).replace(' ','\n');
-            auto *a = columnMenu->addAction(headers.last());
+            headers << QString::fromUtf8(columns[c].title).replace(' ', '\n');
+            auto *a = columnMenu->addAction(QString::fromUtf8(columns[c].title).replace('\n', ' '));
             a->setCheckable(true);
-            a->setChecked(true);
+            a->setChecked(c != fieldColumn("peine_grupo"));
             connect(a, &QAction::toggled, this,
                     [this, c](bool show)
                     {
@@ -426,11 +718,11 @@ class Editor final : public QDialog
         preview = new QGraphicsView(scene, this);
         preview->setRenderHint(QPainter::Antialiasing);
         tabs->addTab(preview, QStringLiteral("Vista previa"));
-        auto *bottom = new QDialogButtonBox(QDialogButtonBox::Close, this);
+        auto *bottom = new QDialogButtonBox(this);
         auto *reload =
             bottom->addButton(QStringLiteral("Descartar cambios de la tabla"), QDialogButtonBox::ResetRole);
         auto *json = bottom->addButton(QStringLiteral("Configuración JSON"), QDialogButtonBox::ActionRole);
-        layout->addWidget(bottom);
+        right->addWidget(bottom);
         connect(bottom, &QDialogButtonBox::rejected, this, &QDialog::close);
         connect(reload, &QPushButton::clicked, this,
                 [this]()
@@ -456,10 +748,21 @@ class Editor final : public QDialog
                                                        : QJsonValue(item->text());
                     if (QString(col.field) == "tipo_borna")
                         value = nativeType(value.toString());
+                    if (QString(col.field) == "color")
+                    {
+                        const QMap<QString, QString> names{
+                            {"Gris", "gray"},     {"Azul", "blue"},   {"Verde/Amarillo", "green/yellow"},
+                            {"Rojo", "red"},      {"Negro", "black"}, {"Blanco", "white"},
+                            {"Naranja", "orange"}};
+                        value = names.value(value.toString(), value.toString());
+                        QColor fill, stripe;
+                        auto spec=value.toString();spec.replace('|','/');
+                        if(spec.compare("Auto",Qt::CaseInsensitive)!=0&&TerminalColor::parse(spec,&fill,&stripe))value=TerminalColor::toSpec(fill,stripe);
+                    }
                     auto &r = data[item->row()];
                     r.values.insert(col.field, value);
                     r.edits.insert(col.field, value);
-                    item->setBackground(QColor("#fff2b5"));
+                    decorate();
                     status->setText(QStringLiteral(
                         "Cambios pendientes. Aplicar los incorpora al proyecto con Deshacer."));
                 });
@@ -489,6 +792,10 @@ class Editor final : public QDialog
                             QStringLiteral("Aplica o descarta los cambios antes de cambiar de bornero."));
                         return;
                     }
+                    {
+                        QSignalBlocker block(stripList);
+                        stripList->setCurrentRow(strips->currentIndex());
+                    }
                     load(selectedStrip());
                 });
         connect(p, &QObject::destroyed, this,
@@ -508,7 +815,216 @@ class Editor final : public QDialog
                                        });
                 });
         populate(s ? s->uuid() : QUuid());
+        for (auto *button : findChildren<QPushButton *>())
+        {
+            button->setAutoDefault(false);
+            button->setDefault(false);
+        }
         watch(p);
+    }
+    void loadExceptions()
+    {
+        QSignalBlocker block(exceptions);
+        exceptions->clear();
+        for (auto rule : cfg.value("external_name_exceptions")
+                             .toString()
+                             .split(QRegularExpression("[\n,;]+"), Qt::SkipEmptyParts))
+        {
+            rule = rule.trimmed().toUpper();
+            rule.replace("=>", "|");
+            if (!rule.contains('|'))
+                rule += "|EXT";
+            auto *item =
+                new QListWidgetItem(rule.section('|', 0, 0) + "    " + rule.section('|', 1, 1), exceptions);
+            item->setData(Qt::UserRole, rule);
+        }
+    }
+    void saveExceptions()
+    {
+        if (loading)
+            return;
+        QStringList rules;
+        for (int i = 0; i < exceptions->count(); ++i)
+            rules << exceptions->item(i)->data(Qt::UserRole).toString();
+        cfg["external_name_exceptions"] = rules.join('\n');
+        configDirty = true;
+        buildConfig();
+        refreshDraft();
+        status->setText(QStringLiteral(
+            "Excepciones INT/EXT actualizadas en la tabla. Pulsa Aplicar en QET para guardarlas."));
+    }
+    void addException()
+    {
+        if (!strip)
+            return;
+        const auto parts = exceptionInput->text().split(QRegularExpression("[,;\\s]+"), Qt::SkipEmptyParts);
+        for (auto pattern : parts)
+        {
+            pattern = pattern.toUpper();
+            const auto rule = pattern + "|" + exceptionSide->currentText();
+            bool exists = false;
+            for (int i = 0; i < exceptions->count(); ++i)
+                exists |= exceptions->item(i)->data(Qt::UserRole).toString() == rule;
+            if (!exists)
+            {
+                auto *item = new QListWidgetItem(pattern + "    " + exceptionSide->currentText(), exceptions);
+                item->setData(Qt::UserRole, rule);
+            }
+        }
+        if (parts.isEmpty())
+            return;
+        exceptionInput->clear();
+        saveExceptions();
+    }
+    void refreshDraft()
+    {
+        if (loading || !strip)
+            return;
+        const auto current = rows(strip, cfg);
+        QMap<QString, QJsonObject> values;
+        for (const auto &r : current)
+            values[r.id] = r.values;
+        for (auto &r : data)
+            if (values.contains(r.id))
+            {
+                r.values = values.value(r.id);
+                for (auto it = r.edits.begin(); it != r.edits.end(); ++it)
+                    r.values[it.key()] = it.value();
+            }
+        const auto position = table->verticalScrollBar()->value();
+        fillTable();
+        filter();
+        decorate();
+        table->verticalScrollBar()->setValue(position);
+        if (tabs->currentIndex() == 3)
+            drawPreview();
+    }
+    void decorate()
+    {
+        if (!table || !messages)
+            return;
+        QSignalBlocker block(table);
+        const QColor green("#98e49a"), orange("#edb88d"), red("#ff6666"), purple("#bc77c7"), blue("#146a94");
+        QMap<QString, int> labels;
+        QSet<QString> doubled;
+        for (const auto &r : data)
+        {
+            const auto label = r.values.value("num_borna").toString();
+            const auto identity = r.physical ? r.physical->uuid().toString() + label : QString();
+            if (!r.values.value("double").toBool() || !doubled.contains(identity))
+                labels[label]++;
+            if (r.values.value("double").toBool())
+                doubled.insert(identity);
+        }
+        QSet<RealTerminal *> comb;
+        for (int i = 0; i < data.size(); ++i)
+            if (data[i].values.value("peine").toBool())
+            {
+                int count = qMax(2, data[i].values.value("peine_grupo").toInt(2));
+                for (int j = i; j < data.size() && count > 0; ++j)
+                    if (data[j].values.value("nivel") == data[i].values.value("nivel"))
+                    {
+                        comb.insert(data[j].terminal.data());
+                        --count;
+                    }
+            }
+        int missing = 0, earth = 0;
+        for (int row = 0; row < data.size(); ++row)
+        {
+            const auto &r = data[row];
+            const auto &v = r.values;
+            const auto model = v.value("modelo").toString();
+            const bool invalidEarth = !model.isEmpty() && (model.contains("PE", Qt::CaseInsensitive) !=
+                                                           (v.value("tipo_borna").toString() == "ground"));
+            missing += model.isEmpty();
+            earth += invalidEarth;
+            for (int c = 0; c < columns.size(); ++c)
+            {
+                auto *item = table->item(row, c);
+                if (!item)
+                    continue;
+                const QString field = columns[c].field;
+                const QColor base = row % 2 ? QColor("#0d2634") : QColor("#071820");
+                item->setBackground(base);
+                item->setForeground(QColor("#eaf7ff"));
+                auto font = item->font();
+                font.setBold(r.edits.contains(field));
+                item->setFont(font);
+                if (!item->data(Qt::UserRole + 12).isValid())
+                    item->setData(Qt::UserRole + 12, item->toolTip());
+                item->setToolTip(item->data(Qt::UserRole + 12).toString());
+                item->setData(SwatchRole, QVariant());
+                item->setData(StripeRole, QVariant());
+                auto paint = [item](const QColor &color, const QColor &ink = Qt::black)
+                {
+                    item->setBackground(color);
+                    item->setForeground(ink);
+                };
+                if (field == "bornero" || field == "num_borna")
+                    paint(green);
+                if (field == "num_borna" && labels.value(v.value(field).toString()) > 1)
+                    paint(purple);
+                if (field == "puente" && v.value("puente").toBool())
+                    paint(green);
+                if (field == "reserva" && v.value("reserva").toBool())
+                    paint(green);
+                if (field == "corte" && v.value("corte").toBool())
+                    paint(blue, Qt::white);
+                if (field == "peine")
+                {
+                    if (comb.contains(r.terminal.data()) || v.value("peine").toBool())
+                        paint(orange);
+                    const int count = v.value("peine_grupo").toInt();
+                    item->setText(count > 1 ? QString::number(count) : QString());
+                    item->setToolTip(QStringLiteral(
+                        "Peine nativo. Ajusta su tamaño en Herramientas de tabla → Tamaño del peine."));
+                }
+                if (field == "color")
+                {
+                    auto colors = terminalColors(r, cfg);
+                    item->setData(SwatchRole, colors.first);
+                    item->setData(StripeRole, colors.second);
+                    item->setToolTip(QStringLiteral("Color: %1. Doble clic para cambiarlo.")
+                                         .arg(v.value("color").toString()));
+                }
+                if (field.startsWith("disp_"))
+                {
+                    if (v.value(field + "_options").toArray().size() > 1)
+                        paint(blue, Qt::white);
+                    for (const auto &device : v.value(field).toString().split(" & ", Qt::SkipEmptyParts))
+                        if (device == "?" || device.startsWith(':') || device.endsWith(':'))
+                            paint(red);
+                }
+                if (field == "modelo" && model.isEmpty())
+                    paint(red);
+                if (invalidEarth && (field == "modelo" || field == "tipo_borna"))
+                    paint(red);
+                if (r.edits.contains(field))
+                    item->setToolTip(item->toolTip() +
+                                     QStringLiteral("\nCambio pendiente de aplicar en QET."));
+            }
+        }
+        const auto warnings = validate(data, cfg);
+        diagnostics->setPlainText(warnings.join('\n'));
+        QStringList report;
+        report << QStringLiteral("%1: %2 bornas · %3 avisos")
+                      .arg(strip ? strip->name() : QString())
+                      .arg(data.size())
+                      .arg(warnings.size());
+        report << (missing ? QStringLiteral("⚠ %1 bornas sin modelo").arg(missing)
+                           : QStringLiteral("✓ Modelos informados"));
+        if (earth)
+            report << QStringLiteral("⚠ %1 inconsistencias PE / Tierra").arg(earth);
+        if (!warnings.isEmpty())
+        {
+            report << QString();
+            report << warnings.mid(0, 100);
+            if (warnings.size() > 100)
+                report << QStringLiteral("… Más detalles en Comprobaciones.");
+        }
+        else
+            report << QStringLiteral("✓ Sin problemas detectados");
+        messages->setPlainText(report.join('\n'));
     }
     bool dirty() const
     {
@@ -550,11 +1066,24 @@ class Editor final : public QDialog
     {
         loading = true;
         strips->clear();
+        stripList->clear();
         if (project)
             for (auto *s : project->terminalStrip())
-                strips->addItem(s->installation() + " " + s->location() + " " + s->name(), s->uuid());
+            {
+                const auto caption = s->installation() + " " + s->location() + " " + s->name();
+                strips->addItem(caption, s->uuid());
+                auto *item = new QListWidgetItem(
+                    QStringLiteral("%1  ·  %2 bornas").arg(s->name()).arg(s->realTerminals().size()),
+                    stripList);
+                item->setData(Qt::UserRole, s->uuid());
+                item->setToolTip(caption);
+                QPixmap icon(16, 20);
+                icon.fill(QColor("#42b883"));
+                item->setIcon(QIcon(icon));
+            }
         auto i = strips->findData(selected);
         strips->setCurrentIndex(i < 0 ? 0 : i);
+        stripList->setCurrentRow(strips->currentIndex());
         loading = false;
         load(selectedStrip());
     }
@@ -570,53 +1099,34 @@ class Editor final : public QDialog
         loadedConfig = cfg;
         refreshPending = false;
         configDirty = false;
-        table->setRowCount(data.size());
-        for (int r = 0; r < data.size(); ++r)
-            for (int c = 0; c < columns.size(); ++c)
-            {
-                const auto col = columns[c];
-                const auto v = data[r].values.value(col.field);
-                auto *item = new QTableWidgetItem(
-                    col.kind == 1
-                        ? QString()
-                        : (QString(col.field) == "tipo_borna" ? displayType(v.toString()) : text(v)));
-                if (QString(col.field) == "tipo_borna")
-                    item->setData(Qt::UserRole, QStringList{"De Paso", "Seccionable", "Tierra", "Fusible",
-                                                            "Diodo", "antiparallel_diodes", "resistor",
-                                                            "varistor", "test_socket", "diode_reversed"});
-                if (col.kind == 1)
-                {
-                    item->setFlags((item->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
-                    item->setCheckState(v.toBool() ? Qt::Checked : Qt::Unchecked);
-                }
-                if (col.kind == 3)
-                    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
-                if (QString(col.field).startsWith("disp_"))
-                {
-                    const auto options = data[r].values.value(QString(col.field) + "_options").toArray();
-                    QStringList choices;
-                    for (const auto &choice : options)
-                        choices << choice.toString();
-                    choices.prepend(QString());
-                    item->setData(Qt::UserRole, choices);
-                    item->setToolTip(
-                        QStringLiteral("Destinos detectados: %1\nVaciar recupera el cálculo automático.")
-                            .arg(choices.join(" / ")));
-                }
-                table->setItem(r, c, item);
-            }
-        table->setEditTriggers(project && !project->isReadOnly()
-                                   ? QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed
-                                   : QAbstractItemView::NoEditTriggers);
+        fillTable();
         buildConfig();
+        loadExceptions();
         loading = false;
         filter();
+        decorate();
         diagnostics->setPlainText(validate(data, cfg).join('\n'));
         status->setText(
-            s ? QStringLiteral(
-                    "Conexiones automáticas del proyecto abierto. Los campos vacíos recuperan el cálculo "
-                    "automático. Los niveles, puentes y reservas pertenecen al gestor de QET.")
-              : QStringLiteral("Asigna las bornas con el gestor de QET para empezar."));
+            s ? QStringLiteral("%1 · Conexiones actualizadas desde el proyecto abierto.").arg(s->name())
+              : QStringLiteral("Asigna las bornas desde el gestor de QET para empezar."));
+        int total = 0;
+        QStringList counts;
+        for (int i = 0; project && i < project->terminalStrip().size(); ++i)
+        {
+            auto *native = project->terminalStrip()[i];
+            total += native->realTerminals().size();
+            counts << QStringLiteral("%1: %2").arg(native->name()).arg(native->realTerminals().size());
+            if (i < stripList->count())
+                stripList->item(i)->setText(QStringLiteral("%1  ·  %2 bornas")
+                                                .arg(native->name())
+                                                .arg(native->realTerminals().size()));
+        }
+        tableSummary->setText(QStringLiteral("%1 bornas | %2 borneros | %3: %4 bornas")
+                                  .arg(total)
+                                  .arg(project ? project->terminalStrip().size() : 0)
+                                  .arg(s ? s->name() : QStringLiteral("—"))
+                                  .arg(data.size()));
+        tableSummary->setToolTip(counts.join(" | "));
         if (s)
         {
             auto refresh = [this]()
@@ -640,12 +1150,62 @@ class Editor final : public QDialog
         if (tabs->currentIndex() == 3)
             drawPreview();
     }
+    void fillTable()
+    {
+        const bool previous = loading;
+        loading = true;
+        table->setRowCount(data.size());
+        for (int r = 0; r < data.size(); ++r)
+            for (int c = 0; c < columns.size(); ++c)
+            {
+                const auto col = columns[c];
+                const auto v = data[r].values.value(col.field);
+                auto *item = new QTableWidgetItem(
+                    col.kind == 1
+                        ? QString()
+                        : (QString(col.field) == "tipo_borna" ? displayType(v.toString()) : text(v)));
+                if (QString(col.field) == "tipo_borna")
+                    item->setData(Qt::UserRole, QStringList{"De Paso", "Seccionable", "Tierra", "Fusible",
+                                                            "Diodo", "antiparallel_diodes", "resistor",
+                                                            "varistor", "test_socket", "diode_reversed"});
+                if (col.kind == 1)
+                {
+                    item->setFlags((item->flags() | Qt::ItemIsUserCheckable) & ~Qt::ItemIsEditable);
+                    item->setCheckState(v.toBool() ? Qt::Checked : Qt::Unchecked);
+                }
+                if (project && project->isReadOnly())
+                    item->setFlags(item->flags() & ~Qt::ItemIsUserCheckable);
+                if (QString(col.field) == "color")
+                    item->setData(Qt::UserRole, QStringList{"Auto", "Gris", "Azul", "Verde/Amarillo", "Rojo",
+                                                            "Negro", "Blanco", "Naranja"});
+                if (col.kind == 3)
+                    item->setFlags(item->flags() & ~Qt::ItemIsEditable);
+                if (QString(col.field).startsWith("disp_"))
+                {
+                    const auto options = data[r].values.value(QString(col.field) + "_options").toArray();
+                    QStringList choices;
+                    for (const auto &choice : options)
+                        choices << choice.toString();
+                    choices.prepend(QString());
+                    item->setData(Qt::UserRole, choices);
+                    item->setToolTip(
+                        QStringLiteral("Destinos detectados: %1\nVaciar recupera el cálculo automático.")
+                            .arg(choices.join(" / ")));
+                }
+                table->setItem(r, c, item);
+            }
+        table->setEditTriggers(project && !project->isReadOnly()
+                                   ? QAbstractItemView::DoubleClicked | QAbstractItemView::EditKeyPressed
+                                   : QAbstractItemView::NoEditTriggers);
+        loading = previous;
+    }
     void buildConfig()
     {
         if (auto *old = configPage->layout())
         {
-            while (auto *item = old->takeAt(0))
+            while (old->count() > 0)
             {
+                auto *item = old->takeAt(0);
                 if (item->widget())
                     delete item->widget();
                 delete item;
@@ -668,6 +1228,14 @@ class Editor final : public QDialog
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            if (k == "external_name_exceptions")
+                            {
+                                loadExceptions();
+                                refreshDraft();
+                            }
+                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                     k == "enable_terminal_colors")
+                                decorate();
                         });
                 field = check;
             }
@@ -682,6 +1250,14 @@ class Editor final : public QDialog
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            if (k == "external_name_exceptions")
+                            {
+                                loadExceptions();
+                                refreshDraft();
+                            }
+                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                     k == "enable_terminal_colors")
+                                decorate();
                         });
                 field = spin;
             }
@@ -693,8 +1269,17 @@ class Editor final : public QDialog
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            if (k == "external_name_exceptions")
+                            {
+                                loadExceptions();
+                                refreshDraft();
+                            }
+                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                     k == "enable_terminal_colors")
+                                decorate();
                         });
                 field = line;
+                field->setObjectName("TBConfig_" + k);
             }
             form->addRow(captions.value(k, k), field);
         }
@@ -851,7 +1436,7 @@ class Editor final : public QDialog
         {
             project->undoStack()->push(command);
             load(strip);
-            table->setCurrentCell(other, 7);
+            table->setCurrentCell(other, fieldColumn("num_borna"));
         }
     }
     void expand()
@@ -994,7 +1579,9 @@ class Editor final : public QDialog
                 if (defaults().contains(it.key()))
                     cfg[it.key()] = it.value();
             buildConfig();
+            loadExceptions();
             configDirty = true;
+            refreshDraft();
         }
         else
         {
@@ -1154,7 +1741,9 @@ class Editor final : public QDialog
                 if (defaults().contains(it.key()))
                     cfg[it.key()] = it.value();
             buildConfig();
+            loadExceptions();
             configDirty = true;
+            refreshDraft();
         }
         status->setText(
             QStringLiteral(
@@ -1204,6 +1793,6 @@ void openEditor(QETProject *project, TerminalStrip *strip, QWidget *parent)
     project->loadFolios();
     auto *dialog = new Editor(project, strip, parent);
     dialog->setWindowModality(Qt::NonModal);
-    dialog->show();
+    dialog->showMaximized();
 }
 } // namespace Faramax::TB

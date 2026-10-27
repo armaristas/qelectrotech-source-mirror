@@ -7,6 +7,7 @@
 #include <QPointer>
 #include <QRectF>
 #include <QSharedPointer>
+#include <QColor>
 class TerminalStrip;
 class RealTerminal;
 class PhysicalTerminal;
@@ -50,6 +51,7 @@ struct Reference
 };
 QVector<Reference> references(TerminalStrip *strip);
 QRectF bounds(TerminalStrip *strip);
+QPair<QColor,QColor> terminalColors(const Row &row,const QJsonObject &config);
 void invalidateDrawing(TerminalStrip *strip);
 void paint(QPainter *painter, TerminalStrip *strip);
 QRectF render(QPainter *painter, TerminalStrip *strip, const QVector<Row> &rows, const QJsonObject &config);

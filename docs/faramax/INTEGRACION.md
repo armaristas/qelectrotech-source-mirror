@@ -14,6 +14,7 @@ Integrar Terminal_Flow, GNerador_Flechas, GNerador_TB, Marker_Pro y 4Mateo en QE
 - Entorno localizado: Qt 6.11.1, MinGW 13.1, CMake y Ninja bajo `C:/Qt`. Submódulos y dependencias de compilación preparados. Las 14 pruebas del motor de Terminal Flow han pasado.
 - GNerador_Flechas portado a campos dinámicos de QET con resolución de cadenas, selección de destinos y opción automática por proyecto. Compilación y pruebas de integración verificadas. Véase [uso y alcance](FLECHAS.md).
 - GNerador_TB integrado sobre los borneros y planes nativos: tabla, INT/EXT, actualización desde el proyecto, puentes/peines, niveles/dobles, reservas, presentación, configuración e historial Excel. Véase [uso y alcance](GNERADOR_TB.md).
+- Interfaz de GNerador TB reorganizada siguiendo la referencia v5.6: panel lateral, selector con cantidades, excepciones, búsqueda, mensajes, orden de columnas, muestras de color y ventana maximizable. Conserva las operaciones nativas y añade pruebas de interacción de la interfaz.
 - Marker_Pro y 4Mateo siguen pendientes de portar.
 - No se ha publicado una versión ni se han enviado cambios al proyecto oficial.
 
@@ -21,7 +22,7 @@ Integrar Terminal_Flow, GNerador_Flechas, GNerador_TB, Marker_Pro y 4Mateo en QE
 
 En Windows, con Qt 6.11.1 y MinGW 13.1: compilación completa correcta; `qelectrotech.exe --version` devuelve `0.200.1-dev` y código 0. SQLite 3.54.1 compilado localmente desde el archivo oficial, verificado contra su SHA3-256 publicado, con las API de serialización comprobadas durante la configuración.
 
-CTest: **6/6 baterías correctas, 0 fallos**, en 37,42 segundos: `tst_terminalflow`, `tst_terminalflowproject`, `tst_arrowtexts`, `tst_gneradortb`, `tst_terminalcableauto` y `tst_terminallabeldisplay`. Incluyen lectura de cambios sin guardar, planificación sin modificar el proyecto, colisiones, bloqueo y solo lectura, fórmulas, deshacer/rehacer, persistencia, conservación de propiedades de conductores, flechas en cadena y ciclos. Las 15 comprobaciones de GNerador TB también cubren conexiones entre folios, conservación de ajustes manuales, puentes/peines, reservas, multinivel, dobles, persistencia y XLSX. Las ventanas de Terminal Flow y GNerador TB y el plano generado se han renderizado y revisado. El XLSX exportado se ha abierto además con openpyxl para comprobar su compatibilidad.
+CTest: **6/6 baterías correctas, 0 fallos**, en 37,21 segundos: `tst_terminalflow`, `tst_terminalflowproject`, `tst_arrowtexts`, `tst_gneradortb`, `tst_terminalcableauto` y `tst_terminallabeldisplay`. Incluyen lectura de cambios sin guardar, planificación sin modificar el proyecto, colisiones, bloqueo y solo lectura, fórmulas, deshacer/rehacer, persistencia, conservación de propiedades de conductores, flechas en cadena y ciclos. Las 18 comprobaciones de GNerador TB también cubren conexiones entre folios, conservación de ajustes manuales, puentes/peines, reservas, multinivel, dobles, persistencia y XLSX. Las ventanas de Terminal Flow y GNerador TB y el plano generado se han renderizado y revisado. El XLSX exportado se ha abierto además con openpyxl para comprobar su compatibilidad.
 
 Esta verificación automatizada no equivale a validar todavía todo el flujo de trabajo sobre los proyectos reales del usuario. Marker_Pro y 4Mateo siguen pendientes. La validación de la ampliación GNerador TB se recoge en su documentación.
 
