@@ -6,11 +6,14 @@
 #include "../qetgraphicsitem/element.h"
 #include "../positionorder.h"
 #include "../undocommand/changeelementinformationcommand.h"
+#include "../faramax/terminalflowwidget.h"
 #include "../qet.h"
 #include <QUndoCommand>
 #include <QCheckBox>
 #include <QVBoxLayout>
 #include <QSet>
+#include <QPushButton>
+#include <QTabWidget>
 #include <algorithm>
 
 namespace {
@@ -34,6 +37,18 @@ TerminalNumberingDialog::TerminalNumberingDialog(QWidget *parent, QETProject *pr
     ui(new Ui::TerminalNumberingDialog)
 {
     ui->setupUi(this);
+
+    // Terminal Flow extends the existing Numbering > Automatic terminal
+    // numbering entry. The original QET controls remain on the first tab.
+    m_terminalFlow = new Faramax::TerminalFlowWidget(project, this);
+    ui->numberingTabs->addTab(m_terminalFlow, tr("Terminal Flow"));
+    connect(ui->numberingTabs, &QTabWidget::currentChanged, this, [this](int index) {
+        auto *ok = ui->buttonBox->button(QDialogButtonBox::Ok);
+        ok->setVisible(index == 0);
+        ok->setDefault(index == 0);
+        ui->buttonBox->button(QDialogButtonBox::Cancel)->setText(index == 0 ? tr("Cancel") : tr("Close"));
+    });
+    resize(950, 740);
 
     // Connect radio button to enable/disable the "also number letters" checkbox
     connect(ui->rb_type_alpha, &QRadioButton::toggled, ui->cb_also_alpha, &QCheckBox::setEnabled);
@@ -90,6 +105,13 @@ TerminalNumberingDialog::TerminalNumberingDialog(QWidget *parent, QETProject *pr
 TerminalNumberingDialog::~TerminalNumberingDialog()
 {
     delete ui;
+}
+
+void TerminalNumberingDialog::accept()
+{
+    // The Flow tab applies its reviewed proposal directly; Enter must not
+    // accidentally run the classic numbering behind it.
+    if (ui->numberingTabs->currentIndex() == 0) QDialog::accept();
 }
 
 /**

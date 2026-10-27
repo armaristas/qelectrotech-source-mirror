@@ -287,6 +287,7 @@ class QETDiagramEditor : public QETMainWindow
 		*m_project_export_wiring_list, ///< Action to export the wiring list
 		*m_project_wiring_list_view,   ///< Action to show the wiring list read from the project database
 		*m_terminal_numbering,         ///< Action to launch terminal numbering
+		*m_faramax_arrow_texts = nullptr, ///< Live connection destinations on reports
 		*m_cable_numbering,            ///< Action to open the cable numbering window (rule + numbering of every cable)
 		*m_add_cable_list,             ///< Add a cable list graphics item
 		*m_export_cable_list,          ///< Export the cable list of the project to CSV

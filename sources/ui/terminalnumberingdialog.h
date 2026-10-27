@@ -7,6 +7,7 @@
 class QETProject;
 class QUndoCommand;
 class QCheckBox;
+namespace Faramax { class TerminalFlowWidget; }
 
 namespace Ui {
     class TerminalNumberingDialog;
@@ -32,9 +33,13 @@ public:
 
     QUndoCommand* getUndoCommand(QETProject *project) const;
 
+public slots:
+    void accept() override;
+
 private:
     Ui::TerminalNumberingDialog *ui;
     QMap<QString, QCheckBox*> m_stripCheckboxes;
+    Faramax::TerminalFlowWidget *m_terminalFlow = nullptr;
 };
 
 #endif // TERMINALNUMBERINGDIALOG_H

@@ -3924,8 +3924,10 @@ void QETProject::readElementsCollectionXml(QDomDocument &xml_project)
 */
 void QETProject::readProjectPropertiesXml(QDomDocument &xml_project)
 {
-	for (const auto &dom_elmt : QET::findInDomElement(xml_project.documentElement(), QStringLiteral("properties")))
+	for (const auto &dom_elmt : QET::findInDomElement(xml_project.documentElement(), QStringLiteral("properties"))) {
 		m_project_properties.fromXml(dom_elmt);
+		setProperty("faramaxAutoArrowText", dom_elmt.attribute(QStringLiteral("faramax_auto_arrow_text")) == QLatin1String("true"));
+	}
 }
 
 /**
@@ -4279,6 +4281,8 @@ void QETProject::readCableXml(const QDomDocument &xml_project)
 */
 void QETProject::writeProjectPropertiesXml(QDomElement &xml_element) {
 	m_project_properties.toXml(xml_element);
+	if (property("faramaxAutoArrowText").toBool())
+		xml_element.setAttribute(QStringLiteral("faramax_auto_arrow_text"), QStringLiteral("true"));
 }
 
 /**

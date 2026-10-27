@@ -726,6 +726,14 @@ set(QET_SRC_FILES
   ${QET_DIR}/sources/TerminalStrip/terminalstrip.h
   ${QET_DIR}/sources/TerminalStrip/terminalstripautoimport.cpp
   ${QET_DIR}/sources/TerminalStrip/terminalstripautoimport.h
+  ${QET_DIR}/sources/faramax/terminalflow.cpp
+  ${QET_DIR}/sources/faramax/terminalflow.h
+  ${QET_DIR}/sources/faramax/terminalflowproject.cpp
+  ${QET_DIR}/sources/faramax/terminalflowproject.h
+  ${QET_DIR}/sources/faramax/terminalflowwidget.cpp
+  ${QET_DIR}/sources/faramax/terminalflowwidget.h
+  ${QET_DIR}/sources/faramax/arrowtexts.cpp
+  ${QET_DIR}/sources/faramax/arrowtexts.h
   ${QET_DIR}/sources/TerminalStrip/terminalstripdata.cpp
   ${QET_DIR}/sources/TerminalStrip/terminalstripdata.h
   ${QET_DIR}/sources/TerminalStrip/ui/addterminalstripitemdialog.cpp

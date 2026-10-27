@@ -138,6 +138,25 @@ if(NOT TARGET SQLite3::SQLite3 AND TARGET SQLite::SQLite3)
     add_library(SQLite3::SQLite3 ALIAS SQLite::SQLite3)
 endif()
 
+# The .qetz container uses both APIs. Some older SQLite packages declare
+# them in sqlite3.h but omit them from the library: fail at configure time
+# rather than after compiling and linking the whole application.
+include(CheckCSourceCompiles)
+include(CMakePushCheckState)
+cmake_push_check_state(RESET)
+set(CMAKE_REQUIRED_LIBRARIES SQLite3::SQLite3)
+unset(QET_SQLITE_HAS_SERIALIZATION CACHE)
+check_c_source_compiles("#include <sqlite3.h>
+int main(void) {
+    sqlite3_int64 size = 0;
+    unsigned char *data = sqlite3_serialize(0, \"main\", &size, 0);
+    return sqlite3_deserialize(0, \"main\", data, size, size, 0);
+}" QET_SQLITE_HAS_SERIALIZATION)
+cmake_pop_check_state()
+if(NOT QET_SQLITE_HAS_SERIALIZATION)
+    message(FATAL_ERROR "SQLite must provide sqlite3_serialize and sqlite3_deserialize. Use a compatible SQLite build; on Windows see faramax/prepare-sqlite.ps1.")
+endif()
+
 set(CMAKE_AUTOUIC_SEARCH_PATHS ${QET_DIR}/sources/ui)
 
 include(cmake/fetch_kdeaddons.cmake)
@@ -197,8 +216,26 @@ if(WIN32)
     else()
         configure_file(${QET_DIR}/build-aux/windows/qelectrotech-manifest.rc.in
                        ${CMAKE_CURRENT_BINARY_DIR}/qelectrotech-manifest.rc @ONLY)
-        target_sources(${PROJECT_NAME} PRIVATE
-                       ${CMAKE_CURRENT_BINARY_DIR}/qelectrotech-manifest.rc)
+        if(MINGW)
+            # windres forwards include paths to gcc without preserving spaces
+            # in some MinGW releases. This manifest has no C/C++ includes or
+            # definitions: compile it with relative filenames, independently
+            # of the application's transitive Qt/source include directories.
+            set(QET_MANIFEST_OBJECT ${CMAKE_CURRENT_BINARY_DIR}/qelectrotech-manifest.obj)
+            add_custom_command(OUTPUT ${QET_MANIFEST_OBJECT}
+                COMMAND ${CMAKE_RC_COMPILER} -O coff
+                        qelectrotech-manifest.rc qelectrotech-manifest.obj
+                WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/qelectrotech-manifest.rc
+                        ${QET_MANIFEST_FILE}
+                VERBATIM)
+            set_source_files_properties(${QET_MANIFEST_OBJECT}
+                PROPERTIES GENERATED TRUE EXTERNAL_OBJECT TRUE)
+            target_sources(${PROJECT_NAME} PRIVATE ${QET_MANIFEST_OBJECT})
+        else()
+            target_sources(${PROJECT_NAME} PRIVATE
+                           ${CMAKE_CURRENT_BINARY_DIR}/qelectrotech-manifest.rc)
+        endif()
     endif()
 endif()
 target_link_libraries(${PROJECT_NAME} PRIVATE ${PROJECT_NAME}_objects)

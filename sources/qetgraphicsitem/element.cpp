@@ -16,6 +16,7 @@
 	along with QElectroTech.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "element.h"
+#include "../faramax/arrowtexts.h"
 #include "../qetapp.h"
 #include "../qetproject.h"
 #include "../dataBase/projectdatabase.h"
@@ -2618,8 +2619,10 @@ QVariant Element::itemChange(GraphicsItemChange change, const QVariant &value)
 	}
 		//Whether the texts of a turned symbol stay horizontal is the
 		//project's setting, known once the element is on one of its folios
-	else if (change == QGraphicsItem::ItemSceneHasChanged)
+	else if (change == QGraphicsItem::ItemSceneHasChanged) {
 		updateSymbolPictures();
+		Faramax::ArrowTexts::prepareNewReport(this);
+	}
 	return QetGraphicsItem::itemChange(change, value);
 }
 

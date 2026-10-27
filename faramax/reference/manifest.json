@@ -1,0 +1,39 @@
+{
+  "upstream": "https://github.com/qelectrotech/qelectrotech-source-mirror.git",
+  "development_fork": "https://github.com/armaristas/qelectrotech-source-mirror.git",
+  "integration_base_commit": "6891413a77215412b12904e366e17d52ec26d772",
+  "upstream_commit": "bf0aaca7149f530bbb2a59928a5da6168ee9af5f",
+  "review_date": "2026-10-26",
+  "tools": [
+    {
+      "tool": "QET_Terminal_Flow",
+      "file": "QET_Terminal_Flow_v2.py",
+      "sha256": "2531C20447BE12F3A6839DA6921EBB18D67247FDB4D6072A2A31A4621D17026D",
+      "source_commit": null
+    },
+    {
+      "tool": "Gnerador_Flechas",
+      "file": "GNerador_Flechas_V5.py",
+      "sha256": "D317250691261B42E4B97AAEDAB5A961F4B796B8D9601B6DB468DFD14B68DAE7",
+      "source_commit": null
+    },
+    {
+      "tool": "GNerador_TB",
+      "file": "GNerador_TB_v5.6.py",
+      "sha256": "F0B7D1A27C90616C8DD65C8A7C6D2717C21BEA08AA420C8E4A5F4A1B55652B28",
+      "source_commit": null
+    },
+    {
+      "tool": "Maker_Pro",
+      "file": "MarKer_Pro_v2.1.py",
+      "sha256": "DFAF162908AFB5F896DD3B116175A45AD5F42795D135CF0B2A55A5F118C86F9A",
+      "source_commit": null
+    },
+    {
+      "tool": "4Mateo",
+      "file": "4Mateo_v4.5.1.py",
+      "sha256": "4825588E0C085909E6A7FAE6C32A764D999F5F50AABD1D30F91C92C2EB59E2D4",
+      "source_commit": null
+    }
+  ]
+}

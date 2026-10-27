@@ -2,6 +2,9 @@
 .flatpak-builder
 __pycache__/
 *.pyc
+/build-faramax/
+/faramax-*.log
+/faramax/reference/*/
 # Qt build output
 *.user
 # doxygen Doxyfile output

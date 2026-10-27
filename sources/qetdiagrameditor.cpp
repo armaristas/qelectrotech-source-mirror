@@ -99,6 +99,7 @@
 #include "undocommand/rotatetextscommand.h"
 #include "diagram.h"
 #include "TerminalStrip/ui/terminalstripeditorwindow.h"
+#include "faramax/arrowtexts.h"
 #include "ui/diagrameditorhandlersizewidget.h"
 #include "TerminalStrip/ui/addterminalstripitemdialog.h"
 #include "wiringlistexport.h"
@@ -990,6 +991,11 @@ void QETDiagramEditor::setUpActions()
 	m_terminal_numbering = new QAction(QET::Icons::TerminalStrip, tr("Automatic numbering of terminals"), this);
 	ShortcutManager::instance().registerAction(m_terminal_numbering, "diagrameditor.terminal_numbering", tr("Diagram editors"), QKeySequence());
 	connect(m_terminal_numbering, &QAction::triggered, this, &QETDiagramEditor::slot_terminalNumbering);
+	m_faramax_arrow_texts = new QAction(tr("GNerador Flechas — textos de destino"), this);
+	ShortcutManager::instance().registerAction(m_faramax_arrow_texts, "diagrameditor.faramax_arrow_texts", tr("Diagram editors"), QKeySequence());
+	connect(m_faramax_arrow_texts, &QAction::triggered, this, [this]() {
+		Faramax::ArrowTexts::openDialog(currentProject(), this);
+	});
 
 	// Cable numbering: the rule the project numbers its cables with, and
 	// the numbering of every cable of that project at once
@@ -1827,6 +1833,7 @@ void QETDiagramEditor::setUpMenu()
 		//terminals have come out of the project menu, the cables are
 		//the new one
 	menu_numbering -> addAction(m_terminal_numbering);
+	menu_numbering -> addAction(m_faramax_arrow_texts);
 	menu_numbering -> addAction(m_cable_numbering);
 
 	// menu Listes
@@ -3226,6 +3233,7 @@ void QETDiagramEditor::slot_updateActions()
 	m_project_export_wiring_list  -> setEnabled(opened_project);
 	m_project_wiring_list_view    -> setEnabled(opened_project);
 	m_terminal_numbering          -> setEnabled(editable_project);
+	m_faramax_arrow_texts         -> setEnabled(editable_project);
 	m_cable_numbering             -> setEnabled(editable_project);
 	m_add_cable_list              -> setEnabled(editable_project);
 	m_export_cable_list           -> setEnabled(editable_project);

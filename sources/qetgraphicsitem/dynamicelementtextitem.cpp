@@ -26,6 +26,7 @@
 #include "../qetapp.h"
 #include "../qetgraphicsitem/conductor.h"
 #include "../qetgraphicsitem/terminal.h"
+#include "../faramax/arrowtexts.h"
 #include "../qetinformation.h"
 #include "../utils/qetutils.h"
 #include "../QetGraphicsItemModeler/qetgraphicshandleritem.h"
@@ -541,6 +542,7 @@ void DynamicElementTextItem::setTextFrom(DynamicElementTextItem::TextFrom text_f
 	}
 
 	emit textFromChanged(m_text_from);
+	Faramax::ArrowTexts::watch(this);
 }
 
 /**
@@ -688,6 +690,7 @@ void DynamicElementTextItem::setCompositeText(const QString &text)
 	}
 	
 	emit compositeTextChanged(m_composite_text);
+	Faramax::ArrowTexts::watch(this);
 }
 
 /**
@@ -913,6 +916,8 @@ void DynamicElementTextItem::paint(QPainter *painter, const QStyleOptionGraphics
 
 QVariant DynamicElementTextItem::itemChange(QGraphicsItem::GraphicsItemChange change, const QVariant &value)
 {
+	if (change == QGraphicsItem::ItemSceneHasChanged)
+		Faramax::ArrowTexts::watch(this);
 		//The first time this text is added to a scene, we make several checking and connection
 		//according to the link type of the parent element
 	if(change == QGraphicsItem::ItemSceneHasChanged && m_first_scene_change)
@@ -1771,6 +1776,8 @@ QString DynamicElementTextItem::reportReplacedCompositeText() const
 		m_parent_element.data()->linkType() == Element::ConductorDefinition)
 	{
 		string = m_composite_text;
+		if (string.contains(Faramax::ArrowTexts::token()))
+			string.replace(Faramax::ArrowTexts::token(), Faramax::ArrowTexts::resolved(m_parent_element.data()));
 		
 		if (string.contains("%{label}") && m_other_report)
 		{
