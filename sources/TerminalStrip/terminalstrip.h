@@ -111,10 +111,10 @@ class TerminalStrip : public QObject
 		void unGroupTerminals(const QVector<QSharedPointer<RealTerminal>> &terminals_to_ungroup);
 		bool setLevel(const QSharedPointer<RealTerminal> &real_terminal, int level);
 
-		bool isBridgeable(const QVector<QSharedPointer<RealTerminal>> &real_terminals) const;
-		bool isBridgeable(QSharedPointer<TerminalStripBridge> bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals) const;
-		bool setBridge(const QVector<QSharedPointer<RealTerminal>> &real_terminals);
-		bool setBridge(const QSharedPointer<TerminalStripBridge> &bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals);
+		bool isBridgeable(const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps = false) const;
+		bool isBridgeable(QSharedPointer<TerminalStripBridge> bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps = false) const;
+		bool setBridge(const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps = false);
+		bool setBridge(const QSharedPointer<TerminalStripBridge> &bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps = false);
 		void unBridge(const QVector<QSharedPointer<RealTerminal>> &real_terminals);
 		bool canUnBridge(const QVector <QSharedPointer<RealTerminal>> &real_terminals) const;
 		QSharedPointer<TerminalStripBridge> isBridged(const QSharedPointer<RealTerminal> real_terminal) const;

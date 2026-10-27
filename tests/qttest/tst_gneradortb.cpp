@@ -15,15 +15,18 @@
 #include "qetproject.h"
 #include <QDialog>
 #include <QDir>
+#include <QDoubleSpinBox>
 #include <QFile>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMenu>
 #include <QPainter>
 #include <QPushButton>
 #include <QSignalSpy>
 #include <QTableWidget>
 #include <QTemporaryDir>
+#include <QTimer>
 #include <QUndoStack>
 #include <memory>
 using namespace Faramax::TB;
@@ -328,7 +331,7 @@ class tst_gneradortb : public QObject
         QCOMPARE(s->realTerminals()[0]->label(), s->realTerminals()[1]->label());
         QVERIFY(rows(s)[0].values["double"].toBool());
         auto edited = rows(s);
-        edited[0].edits = {{"corte", true}, {"shl_ext", true}, {"peine_grupo", 4}};
+        edited[0].edits = {{"corte", true}, {"shl_ext", true}, {"peine_grupo", 1}};
         for (auto it = edited[0].edits.begin(); it != edited[0].edits.end(); ++it)
             edited[0].values[it.key()] = it.value();
         push(p, s, edited, settings(s));
@@ -348,7 +351,7 @@ class tst_gneradortb : public QObject
         const auto output = rows(copy);
         QVERIFY(output[0].values["corte"].toBool());
         QVERIFY(output[0].values["shl_ext"].toBool());
-        QCOMPARE(output[0].values["peine_grupo"].toInt(), 4);
+        QCOMPARE(output[0].values["peine_grupo"].toInt(), 1);
         QVERIFY(output[0].values["double"].toBool());
     }
     void remoteFolioRenameDisconnectAndDeletedTerminal()
@@ -529,8 +532,9 @@ class tst_gneradortb : public QObject
         auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
         auto *list = dialog->findChild<QListWidget *>("TBStripList");
         auto *search = dialog->findChild<QLineEdit *>("TBSearch");
-        auto *apply = dialog->findChild<QPushButton *>("TBApply");
-        QVERIFY(table && list && search && apply);
+        QVERIFY(!dialog->findChild<QPushButton *>("TBApply"));
+        QVERIFY(!dialog->findChild<QPushButton *>("TBRefresh"));
+        QVERIFY(table && list && search);
         QCOMPARE(list->count(), p.terminalStrip().size());
         QCOMPARE(table->horizontalHeaderItem(0)->text(), QString("Corte"));
         QCOMPARE(table->horizontalHeaderItem(10)->text(), QString("Nº\nBorna"));
@@ -546,13 +550,12 @@ class tst_gneradortb : public QObject
         table->item(0, 10)->setText("51");
         table->item(0, 14)->setText("MANUAL:9");
         table->item(0, 4)->setText(QString::fromUtf8("Azul"));
-        const auto proposedColor=table->item(0,4)->data(Qt::UserRole+10).value<QColor>();
+        const auto proposedColor = table->item(0, 4)->data(Qt::UserRole + 10).value<QColor>();
         QCOMPARE(p.undoStack()->count(), count);
-        apply->click();
-        QCOMPARE(s->realTerminals()[0]->label(), QString("XT:51"));
+        QTRY_COMPARE(s->realTerminals()[0]->label(), QString("XT:51"));
         QCOMPARE(rows(s)[0].values["disp_int"].toString(), QString("MANUAL:9"));
         QVERIFY(s->realTerminals()[0]->color().isValid());
-        QCOMPARE(s->realTerminals()[0]->color(),proposedColor);
+        QCOMPARE(s->realTerminals()[0]->color(), proposedColor);
         QCOMPARE(p.undoStack()->count(), count + 1);
         p.undoStack()->undo();
         QCoreApplication::processEvents();
@@ -569,8 +572,7 @@ class tst_gneradortb : public QObject
         QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, rect.center());
         QVERIFY(table->item(0, 0)->checkState() == Qt::Checked);
         QVERIFY(!rows(s)[0].values["corte"].toBool());
-        apply->click();
-        QVERIFY(rows(s)[0].values["corte"].toBool());
+        QTRY_VERIFY(rows(s)[0].values["corte"].toBool());
         const int undoIndex = p.undoStack()->index();
         int other = -1;
         for (int i = 0; i < list->count(); ++i)
@@ -583,7 +585,7 @@ class tst_gneradortb : public QObject
         dialog->close();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     }
-    void sidebarExceptionsPreserveDraftsUntilNativeApply()
+    void sidebarExceptionsAndDraftsApplyTogether()
     {
         QETProject p(fixture());
         p.loadFolios();
@@ -606,8 +608,9 @@ class tst_gneradortb : public QObject
         auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
         auto *pattern = dialog->findChild<QLineEdit *>("TBExceptionPattern");
         auto *add = dialog->findChild<QPushButton *>("TBAddException");
-        auto *apply = dialog->findChild<QPushButton *>("TBApply");
-        QVERIFY(table && pattern && add && apply);
+        QVERIFY(!dialog->findChild<QPushButton *>("TBApply"));
+        QVERIFY(!dialog->findChild<QPushButton *>("TBRefresh"));
+        QVERIFY(table && pattern && add);
         int index = -1;
         auto initial = rows(s);
         for (int i = 0; i < initial.size(); ++i)
@@ -621,10 +624,7 @@ class tst_gneradortb : public QObject
         QVERIFY(dialog->isVisible());
         QCOMPARE(table->item(index, 14)->text(), QString("PENDING:1"));
         QVERIFY(table->item(index, 5)->text().contains("UI_DEVICE:7"));
-        QCOMPARE(p.undoStack()->count(), before);
-        QVERIFY(settings(s).value("external_name_exceptions").toString().isEmpty());
-        apply->click();
-        QVERIFY(settings(s).value("external_name_exceptions").toString().contains("UI_DEVICE|EXT"));
+        QTRY_VERIFY(settings(s).value("external_name_exceptions").toString().contains("UI_DEVICE|EXT"));
         QCOMPARE(rows(s)[index].values["disp_int"].toString(), QString("PENDING:1"));
         p.undoStack()->undo();
         QCoreApplication::processEvents();
@@ -632,6 +632,194 @@ class tst_gneradortb : public QObject
         QVERIFY(settings(s).value("external_name_exceptions").toString().isEmpty());
         dialog->close();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void sparseCombAndIndependentJumpersUndo()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *s = spares(p, 10);
+        auto r = rows(s);
+        // An existing sparse native bridge must survive an unrelated comb edit.
+        QVERIFY(s->setBridge({r[6].terminal, r[8].terminal}, true));
+        r = rows(s);
+        for (int i = 0; i < 4; ++i)
+        {
+            r[i].edits["peine_grupo"] = i == 0 ? 4 : -1;
+            r[i].edits["peine"] = (i == 0 || i == 3);
+        }
+        QString error;
+        auto *cmd = editCommand(s, r, settings(s), error);
+        QVERIFY2(cmd, qPrintable(error));
+        p.undoStack()->push(cmd);
+        QVERIFY(r[0].terminal->bridge() == r[3].terminal->bridge());
+        QVERIFY(r[0].terminal->isBridged());
+        QVERIFY(!r[1].terminal->isBridged());
+        QVERIFY(!r[2].terminal->isBridged());
+        QVERIFY(r[6].terminal->bridge() == r[8].terminal->bridge());
+        QVERIFY(!s->isBridgeable({r[1].terminal, r[4].terminal}));
+        auto current = rows(s);
+        QVERIFY(current[0].values["peine"].toBool());
+        QVERIFY(!current[1].values["peine"].toBool());
+        QVERIFY(!current[0].values["puente"].toBool());
+        p.undoStack()->undo();
+        QVERIFY(!r[0].terminal->isBridged());
+        QVERIFY(r[6].terminal->isBridged());
+        p.undoStack()->redo();
+        QVERIFY(r[0].terminal->bridge() == r[3].terminal->bridge());
+        current = rows(s);
+        current[4].edits["puente"] = true;
+        cmd = editCommand(s, current, settings(s), error);
+        QVERIFY2(cmd, qPrintable(error));
+        p.undoStack()->push(cmd);
+        QVERIFY(r[0].terminal->bridge() == r[3].terminal->bridge());
+        QVERIFY(!r[1].terminal->isBridged());
+        QVERIFY(r[4].terminal->isBridged());
+        QVERIFY(r[4].terminal->bridge() == r[5].terminal->bridge());
+        QTemporaryDir dir;
+        QFile file(dir.filePath("sparse.qet"));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(p.toXml().toByteArray());
+        file.close();
+        QETProject reopened(file.fileName());
+        QCOMPARE(reopened.state(), QETProject::Ok);
+        TerminalStrip *restored = nullptr;
+        for (auto *candidate : reopened.terminalStrip())
+            if (candidate->uuid() == s->uuid())
+                restored = candidate;
+        QVERIFY(restored);
+        auto persisted = rows(restored);
+        QVERIFY(persisted[0].terminal->isBridged());
+        QVERIFY(persisted[0].terminal->bridge() == persisted[3].terminal->bridge());
+        QVERIFY(!persisted[1].terminal->isBridged());
+        QCOMPARE(persisted[1].values["peine_grupo"].toInt(), -1);
+    }
+    void livePaintingAndConfiguration()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *s = spares(p, 8);
+        openEditor(&p, s, nullptr);
+        QDialog *dialog = nullptr;
+        for (auto *w : QApplication::topLevelWidgets())
+            if (w->objectName() == "faramaxGNeradorTB")
+                dialog = qobject_cast<QDialog *>(w);
+        QVERIFY(dialog);
+        auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
+        QVERIFY(table);
+        auto *config = dialog->findChild<QDialog *>("TBConfiguration");
+        QVERIFY(config);
+        QVERIFY(!config->isVisible());
+        QVERIFY(table->parentWidget() != config);
+        bool menuChecked = false;
+        QTimer::singleShot(
+            0, dialog,
+            [&]()
+            {
+                auto *menu = dialog->findChild<QMenu *>("TBEssentialMenu");
+                if (menu)
+                {
+                    menuChecked = menu->objectName() == "TBEssentialMenu" && menu->actions().size() == 6;
+                    for (auto *a : menu->actions())
+                        menuChecked = menuChecked && !a->text().isEmpty() && !a->text().contains("historial");
+                    menu->close();
+                }
+            });
+        const auto menuPoint = table->visualItemRect(table->item(0, 3)).center();
+        QMetaObject::invokeMethod(table, "customContextMenuRequested", Qt::DirectConnection,
+                                  Q_ARG(QPoint, menuPoint));
+        QVERIFY(menuChecked);
+        const int before = p.undoStack()->index();
+        auto start = table->visualItemRect(table->item(0, 8)).center();
+        auto end = table->visualItemRect(table->item(2, 8)).center();
+        QTest::mousePress(table->viewport(), Qt::LeftButton, Qt::NoModifier, start);
+        QTest::mouseMove(table->viewport(), end);
+        QTest::mouseRelease(table->viewport(), Qt::LeftButton, Qt::NoModifier, end);
+        QTRY_VERIFY(rows(s)[0].terminal->isBridged());
+        auto r = rows(s);
+        QVERIFY(r[0].terminal->bridge() == r[3].terminal->bridge());
+        QCOMPARE(p.undoStack()->index(), before + 1);
+        QVERIFY(table->item(3, 8)->background().color().isValid());
+        p.undoStack()->undo();
+        QTRY_VERIFY(!rows(s)[0].terminal->isBridged());
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents();
+        QTRY_COMPARE(table->item(0,8)->checkState(),Qt::Unchecked);
+        table->scrollToItem(table->item(0,11));
+        const auto combAnchor = table->visualItemRect(table->item(0, 11)).center();
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, combAnchor);
+        QTRY_COMPARE(rows(s)[0].values["peine_grupo"].toInt(), 1);
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, combAnchor);
+        QTRY_COMPARE(rows(s)[0].values["peine_grupo"].toInt(), 2);
+        const auto combContact = table->visualItemRect(table->item(1, 11)).center();
+        QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, combContact);
+        QTRY_VERIFY(rows(s)[1].terminal->isBridged());
+        QMetaObject::invokeMethod(table, "customContextMenuRequested", Qt::DirectConnection,
+                                  Q_ARG(QPoint, combAnchor));
+        QTRY_COMPARE(rows(s)[0].values["peine_grupo"].toInt(), 1);
+        QVERIFY(!rows(s)[1].terminal->isBridged());
+        config->show();
+        auto *field = config->findChild<QDoubleSpinBox *>("TBConfig_paso_x");
+        QVERIFY(field);
+        field->setValue(23);
+        QTRY_COMPARE(settings(s).value("paso_x").toInt(), 23);
+        QVERIFY(field == config->findChild<QDoubleSpinBox *>("TBConfig_paso_x"));
+        dialog->close();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void representativeDrawing()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *s = spares(p, 30);
+        auto data = rows(s);
+        auto cfg = defaults();
+        cfg["draw_frame"] = true;
+        for (int i = 0; i < data.size(); ++i)
+        {
+            auto &v = data[i].values;
+            v["modelo"] = i == 5 ? "WPE 6" : i == 7 ? "WDU 6 BL" : "WDU 4";
+            v["posicion"] = QString("3-%1%2").arg(QChar('B' + i / 6)).arg(1 + i / 6);
+            v["reserva"] = i > 25;
+            if (i < 26)
+            {
+                v["disp_int"] = QString("8M-%1:%2").arg(i / 3 + 1).arg(i % 3 + 1);
+                v["mang_int"] = QString("W%1").arg(i / 6 + 1);
+                v["cable_int"] = QString::number(i % 6 + 1);
+            }
+            if (i < 16)
+            {
+                v["disp_ext"] = QString("XCC1:%1").arg(i + 1);
+                v["mang_ext"] = QString("W%1").arg(10 + i / 4);
+            }
+            if (i == 5)
+            {
+                v["tipo_borna"] = "ground";
+                v["disp_int"] = "PE";
+            }
+            if (i < 3)
+                v["puente"] = true;
+            if (i >= 10 && i < 16)
+            {
+                v["peine_grupo"] = i == 10 ? 6 : -1;
+                v["peine"] = (i % 2 == 0);
+            }
+        }
+        data[5].values["shl_int"] = true;
+        data[5].values["mang_shl_int"] = "1/6";
+        auto box = render(nullptr, s, data, cfg);
+        QVERIFY(box.width() > 500);
+        QVERIFY(box.height() > 400);
+        const auto path = qEnvironmentVariable("QET_TB_WIDE_PREVIEW");
+        if (!path.isEmpty())
+        {
+            QImage image(box.size().toSize() + QSize(30, 30), QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            painter.translate(15 - box.left(), 15 - box.top());
+            render(&painter, s, data, cfg);
+            painter.end();
+            QVERIFY(image.save(path));
+        }
     }
     void closingProjectDisposesSidebarEditor()
     {

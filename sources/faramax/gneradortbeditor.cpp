@@ -22,6 +22,7 @@
 #include <QCloseEvent>
 #include <QCollator>
 #include <QComboBox>
+#include <QCursor>
 #include <QDesktopServices>
 #include <QDialog>
 #include <QDialogButtonBox>
@@ -31,10 +32,12 @@
 #include <QFrame>
 #include <QGraphicsScene>
 #include <QGraphicsView>
+#include <QGridLayout>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
 #include <QJsonDocument>
+#include <QKeyEvent>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -307,6 +310,13 @@ class Editor final : public QDialog
     QJsonObject cfg, loadedConfig;
     bool loading = false, configDirty = false, applying = false;
     bool refreshPending = false;
+    QTimer liveTimer;
+    QDialog *configDialog = nullptr;
+    bool keepConfig = false;
+    bool painting = false, paintValue = false;
+    int paintColumn = -1, paintFirst = -1, paintLast = -1;
+    int moveSource = -1;
+    bool paintSticky = false, resizeOnRelease = false;
     QVector<QMetaObject::Connection> connections;
     QMap<QUuid, QByteArray> exported;
 
@@ -320,6 +330,7 @@ class Editor final : public QDialog
         resize(1600, 900);
         setMinimumSize(1000, 650);
         setStyleSheet(QStringLiteral(R"CSS(
+QDialog#TBConfiguration { background:#071b24; }
 QDialog#faramaxGNeradorTB { background:#071b24; color:#eaf7ff; font-family:'Segoe UI'; font-size:12px; }
 QWidget { color:#eaf7ff; font-family:'Segoe UI'; font-size:12px; }
 QFrame#TBLeft, QFrame#TBWork { background:#0b2534; border:1px solid #25465a; border-radius:6px; }
@@ -330,8 +341,8 @@ QLabel#TBTableSummary { color:#8db4c6; font-size:11px; }
 QPushButton { background:#102b3c; border:1px solid #2d5264; border-radius:6px; padding:6px 8px; font-weight:600; }
 QPushButton:hover { background:#15384d; border-color:#5ad7f7; }
 QPushButton:disabled { color:#64818e; }
-QPushButton#TBRefresh { background:#198bd2; border-color:#6bd6f4; }
-QPushButton#TBApply { background:#df8500; border-color:#f6bd50; }
+
+
 QPushButton#TBInsert { background:#299b68; border-color:#54c68e; }
 QPushButton#TBClose { background:#3c1f22; border-color:#75383e; }
 QLineEdit,QPlainTextEdit,QListWidget,QComboBox,QDoubleSpinBox { background:#081a24; color:#eaf7ff; border:1px solid #25465a; border-radius:4px; padding:4px; selection-background-color:#146a94; }
@@ -379,22 +390,6 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             connect(b, &QPushButton::clicked, this, action);
             return b;
         };
-        button(QStringLiteral("Actualizar desde QET"), "TBRefresh",
-               [this]()
-               {
-                   if (dirty() || delegate->active)
-                   {
-                       status->setText(
-                           QStringLiteral("Aplica o descarta los cambios pendientes antes de actualizar."));
-                       return;
-                   }
-                   populate(strip ? strip->uuid() : QUuid());
-               });
-        button(QStringLiteral("Aplicar en QET"), "TBApply",
-               [this]()
-               {
-                   apply();
-               });
         button(QStringLiteral("Insertar plan en folio"), "TBInsert",
                [this]()
                {
@@ -408,7 +403,9 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         button(QStringLiteral("Configuración"), "TBConfig",
                [this]()
                {
-                   tabs->setCurrentIndex(1);
+                   configDialog->show();
+                   configDialog->raise();
+                   configDialog->activateWindow();
                });
         button(QStringLiteral("Cerrar"), "TBClose",
                [this]()
@@ -498,10 +495,6 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         splitter->setSizes({240, 1360});
         auto *tools = new QToolBar(this);
         tools->hide();
-        auto *editMenu = new QMenu(this);
-        auto *editButton = new QPushButton(QStringLiteral("Herramientas de tabla"), work);
-        editButton->setMenu(editMenu);
-        heading->addWidget(editButton);
         tools->addAction(QStringLiteral("Asignar / reagrupar"), this,
                          [this]()
                          {
@@ -537,6 +530,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                                  return;
                              cfg["reserve_count"] = qMax(0, cfg.value("reserve_count").toInt() - converted);
                              configDirty = true;
+                             queueApply(300);
                              apply();
                          });
         tools->addAction(QStringLiteral("Quitar del bornero"), this,
@@ -559,21 +553,21 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                          {
                              expand();
                          });
-        tools->addAction(
-            QStringLiteral("Tamaño del peine…"), this,
-            [this]()
-            {
-                const int row = table->currentRow();
-                if (row < 0)
-                    return;
-                bool accepted = false;
-                const int count = QInputDialog::getInt(
-                    this, QStringLiteral("Peine"),
-                    QStringLiteral("Número de bornas consecutivas del mismo nivel"),
-                    qMax(2, data[row].values.value("peine_grupo").toInt()), 2, 10000, 1, &accepted);
-                if (accepted)
-                    table->item(row, fieldColumn("peine_grupo"))->setText(QString::number(count));
-            });
+        tools->addAction(QStringLiteral("Tamaño del peine…"), this,
+                         [this]()
+                         {
+                             const int row = table->currentRow();
+                             if (row < 0)
+                                 return;
+                             bool accepted = false;
+                             const int count = QInputDialog::getInt(
+                                 this, QStringLiteral("Peine"),
+                                 QStringLiteral("Número de bornas consecutivas del mismo nivel"),
+                                 qMax(1, data[row].values.value("peine_grupo").toInt()), 0,
+                                 qMin(10, int(data.size()) - row), 1, &accepted);
+                             if (accepted)
+                                 setCombSpan(row, count);
+                         });
         tools->addAction(QStringLiteral("Ordenar"), this,
                          [this]()
                          {
@@ -633,17 +627,27 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         auto *columnMenu = new QMenu(this);
         auto *columnButton = tools->addAction(QStringLiteral("Columnas"));
         columnButton->setMenu(columnMenu);
-        editMenu->addActions(tools->actions());
+        configDialog = new QDialog(this);
+        configDialog->setObjectName("TBConfiguration");
+        configDialog->setWindowTitle(QStringLiteral("Configuración del bornero"));
+        configDialog->resize(850, 750);
+        auto *configLayout = new QVBoxLayout(configDialog);
         status = new QLabel(this);
         status->setWordWrap(true);
         left->insertWidget(7, status);
         status->setMaximumHeight(72);
-        tabs = new QTabWidget(this);
-        right->addWidget(tabs, 1);
+        tabs = new QTabWidget(configDialog);
+        configLayout->addWidget(tabs);
         table = new QTableWidget(this);
         table->setObjectName("gneradorTBTable");
-        table->setContextMenuPolicy(Qt::ActionsContextMenu);
-        table->addActions(tools->actions());
+        table->setContextMenuPolicy(Qt::CustomContextMenu);
+        table->viewport()->installEventFilter(this);
+        table->installEventFilter(this);
+        connect(table, &QWidget::customContextMenuRequested, this,
+                [this](const QPoint &point)
+                {
+                    contextMenu(point);
+                });
         table->setColumnCount(columns.size());
         table->setAlternatingRowColors(true);
         table->setWordWrap(false);
@@ -691,6 +695,43 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                  {
                      paste();
                  });
+        shortcut(QKeySequence::Delete,
+                 [this]()
+                 {
+                     clearCells();
+                 });
+        shortcut(QKeySequence::Undo,
+                 [this]()
+                 {
+                     if (cleanForAction())
+                         project->undoStack()->undo();
+                 });
+        shortcut(QKeySequence::Redo,
+                 [this]()
+                 {
+                     if (cleanForAction())
+                         project->undoStack()->redo();
+                 });
+        shortcut(QKeySequence::SelectAll,
+                 [this]()
+                 {
+                     table->selectAll();
+                 });
+        shortcut(QKeySequence("Ctrl+D"),
+                 [this]()
+                 {
+                     fill(false);
+                 });
+        shortcut(QKeySequence("Ctrl+R"),
+                 [this]()
+                 {
+                     fill(true);
+                 });
+        shortcut(QKeySequence("Ctrl+Shift+Delete"),
+                 [this]()
+                 {
+                     remove();
+                 });
         QStringList headers;
         for (int c = 0; c < columns.size(); ++c)
         {
@@ -705,7 +746,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                     });
         }
         table->setHorizontalHeaderLabels(headers);
-        tabs->addTab(table, QStringLiteral("Bornas"));
+        right->addWidget(table, 1);
         auto *scroll = new QScrollArea(this);
         scroll->setWidgetResizable(true);
         configPage = new QWidget(scroll);
@@ -718,21 +759,40 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         preview = new QGraphicsView(scene, this);
         preview->setRenderHint(QPainter::Antialiasing);
         tabs->addTab(preview, QStringLiteral("Vista previa"));
-        auto *bottom = new QDialogButtonBox(this);
-        auto *reload =
-            bottom->addButton(QStringLiteral("Descartar cambios de la tabla"), QDialogButtonBox::ResetRole);
-        auto *json = bottom->addButton(QStringLiteral("Configuración JSON"), QDialogButtonBox::ActionRole);
-        right->addWidget(bottom);
-        connect(bottom, &QDialogButtonBox::rejected, this, &QDialog::close);
-        connect(reload, &QPushButton::clicked, this,
-                [this]()
-                {
-                    populate(strip ? strip->uuid() : QUuid());
-                });
+        auto *operations = new QWidget(configDialog);
+        auto *operationsLayout = new QGridLayout(operations);
+        int actionIndex = 0;
+        for (auto *action : tools->actions())
+        {
+            auto *control = new QPushButton(action->text(), operations);
+            control->setMenu(action->menu());
+            if (!action->menu())
+                connect(control, &QPushButton::clicked, action, &QAction::trigger);
+            operationsLayout->addWidget(control, actionIndex / 2, actionIndex % 2);
+            ++actionIndex;
+        }
+        auto *json = new QPushButton(QStringLiteral("Importar / exportar configuración JSON"), operations);
+        operationsLayout->addWidget(json, actionIndex / 2 + 1, 0, 1, 2);
         connect(json, &QPushButton::clicked, this,
                 [this]()
                 {
                     configuration();
+                });
+        tabs->addTab(operations, QStringLiteral("Edición y datos"));
+        auto *configClose = new QDialogButtonBox(QDialogButtonBox::Close, configDialog);
+        configLayout->addWidget(configClose);
+        connect(configClose, &QDialogButtonBox::rejected, configDialog, &QDialog::hide);
+        liveTimer.setSingleShot(true);
+        connect(&liveTimer, &QTimer::timeout, this,
+                [this]()
+                {
+                    if (delegate->active || painting)
+                    {
+                        liveTimer.start(50);
+                        return;
+                    }
+                    if (dirty())
+                        apply(false);
                 });
         connect(table, &QTableWidget::itemChanged, this,
                 [this](QTableWidgetItem *item)
@@ -756,15 +816,23 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                             {"Naranja", "orange"}};
                         value = names.value(value.toString(), value.toString());
                         QColor fill, stripe;
-                        auto spec=value.toString();spec.replace('|','/');
-                        if(spec.compare("Auto",Qt::CaseInsensitive)!=0&&TerminalColor::parse(spec,&fill,&stripe))value=TerminalColor::toSpec(fill,stripe);
+                        auto spec = value.toString();
+                        spec.replace('|', '/');
+                        if (spec.compare("Auto", Qt::CaseInsensitive) != 0 &&
+                            TerminalColor::parse(spec, &fill, &stripe))
+                            value = TerminalColor::toSpec(fill, stripe);
                     }
                     auto &r = data[item->row()];
                     r.values.insert(col.field, value);
                     r.edits.insert(col.field, value);
+                    if (QString(col.field) == "peine" && value.toBool() &&
+                        r.values.value("peine_grupo").toInt() == 0)
+                    {
+                        r.values["peine_grupo"] = 1;
+                        r.edits["peine_grupo"] = 1;
+                    }
                     decorate();
-                    status->setText(QStringLiteral(
-                        "Cambios pendientes. Aplicar los incorpora al proyecto con Deshacer."));
+                    queueApply();
                 });
         connect(search, &QLineEdit::textChanged, this,
                 [this]()
@@ -774,9 +842,9 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         connect(tabs, &QTabWidget::currentChanged, this,
                 [this](int index)
                 {
-                    if (index == 2)
+                    if (index == 1)
                         diagnostics->setPlainText(validate(data, cfg).join('\n'));
-                    if (index == 3)
+                    if (index == 2)
                         drawPreview();
                 });
         connect(strips, qOverload<int>(&QComboBox::currentIndexChanged), this,
@@ -784,12 +852,12 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                 {
                     if (loading)
                         return;
-                    if (dirty())
+                    if (dirty() && !apply(false))
                     {
                         QSignalBlocker block(strips);
                         strips->setCurrentIndex(strips->findData(strip ? strip->uuid() : QUuid()));
                         status->setText(
-                            QStringLiteral("Aplica o descarta los cambios antes de cambiar de bornero."));
+                            QStringLiteral("Corrige los valores pendientes antes de cambiar de bornero."));
                         return;
                     }
                     {
@@ -822,6 +890,276 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         }
         watch(p);
     }
+    void setDraft(int row, const QString &field, const QJsonValue &value)
+    {
+        if (row < 0 || row >= data.size())
+            return;
+        data[row].values[field] = value;
+        data[row].edits[field] = value;
+        QSignalBlocker block(table);
+        auto *item = table->item(row, fieldColumn(field));
+        if (item)
+        {
+            if (value.isBool())
+                item->setCheckState(value.toBool() ? Qt::Checked : Qt::Unchecked);
+            else
+                item->setText(text(value));
+        }
+    }
+    void setCombSpan(int row, int count)
+    {
+        if (row < 0 || row >= data.size())
+            return;
+        count = qBound(0, count, qMin(10, int(data.size()) - row));
+        const int old = qMax(0, data[row].values.value("peine_grupo").toInt());
+        for (int i = row; i < qMin(int(data.size()), row + qMax(1, qMax(old, count))); ++i)
+        {
+            if (i == row && count > 0)
+            {
+                setDraft(i, "peine_grupo", count);
+                if (old == 0)
+                    setDraft(i, "peine", true);
+            }
+            else if (i < row + count)
+                setDraft(i, "peine_grupo", -1);
+            else
+            {
+                setDraft(i, "peine_grupo", 0);
+                setDraft(i, "peine", false);
+            }
+        }
+        decorate();
+        queueApply();
+    }
+    void paintCell(int row)
+    {
+        if (row < 0 || row >= data.size() || table->isRowHidden(row))
+            return;
+        if (paintColumn == fieldColumn("puente") && paintValue)
+        {
+            int next = row + 1;
+            while (next < data.size() && data[next].terminal->level() != data[row].terminal->level())
+                ++next;
+            if (next == data.size())
+                return;
+        }
+        if (paintColumn == fieldColumn("peine") && data[row].values.value("peine_grupo").toInt() == 0)
+            setDraft(row, "peine_grupo", 1);
+        setDraft(row, columns[paintColumn].field, paintValue);
+        decorate();
+    }
+    bool eventFilter(QObject *watched, QEvent *event) override
+    {
+        if (watched == table || watched == table->viewport())
+        {
+            if (event->type() == QEvent::KeyPress && static_cast<QKeyEvent *>(event)->key() == Qt::Key_Escape)
+            {
+                painting = false;
+                paintSticky = false;
+                moveSource = -1;
+                table->viewport()->unsetCursor();
+                queueApply();
+                return true;
+            }
+            if (watched == table->viewport() && project && !project->isReadOnly())
+            {
+                if (event->type() == QEvent::MouseButtonPress)
+                {
+                    auto *mouse = static_cast<QMouseEvent *>(event);
+                    auto index = table->indexAt(mouse->position().toPoint());
+                    if (moveSource >= 0 && index.isValid())
+                    {
+                        moveBelow(moveSource, index.row());
+                        moveSource = -1;
+                        table->viewport()->unsetCursor();
+                        return true;
+                    }
+                    if (mouse->button() == Qt::LeftButton && index.isValid() &&
+                        (index.column() == fieldColumn("puente") || index.column() == fieldColumn("peine")))
+                    {
+                        liveTimer.stop();
+                        painting = true;
+                        paintFirst = paintLast = index.row();
+                        if (!paintSticky)
+                        {
+                            paintColumn = index.column();
+                            paintValue = !data[paintFirst].values.value(columns[paintColumn].field).toBool();
+                        }
+                        if (index.column() != paintColumn)
+                        {
+                            painting = false;
+                            return false;
+                        }
+                        resizeOnRelease = !paintSticky && paintColumn == fieldColumn("peine") &&
+                                          data[paintFirst].values.value("peine_grupo").toInt() > 0;
+                        if (!resizeOnRelease)
+                            paintCell(paintFirst);
+                        return true;
+                    }
+                }
+                if (event->type() == QEvent::MouseMove && painting)
+                {
+                    auto *mouse = static_cast<QMouseEvent *>(event);
+                    auto index = table->indexAt(mouse->position().toPoint());
+                    if (index.isValid() && index.column() == paintColumn && index.row() != paintLast)
+                    {
+                        if (resizeOnRelease)
+                        {
+                            resizeOnRelease = false;
+                            paintValue = true;
+                            paintCell(paintFirst);
+                        }
+                        const int direction = index.row() > paintLast ? 1 : -1;
+                        for (int row = paintLast + direction; row != index.row() + direction;
+                             row += direction)
+                            paintCell(row);
+                        paintLast = index.row();
+                    }
+                    return true;
+                }
+                if (event->type() == QEvent::MouseButtonRelease && painting)
+                {
+                    painting = false;
+                    if (resizeOnRelease)
+                    {
+                        resizeOnRelease = false;
+                        setCombSpan(paintFirst, data[paintFirst].values.value("peine_grupo").toInt() + 1);
+                    }
+                    else
+                        queueApply();
+                    return true;
+                }
+            }
+        }
+        return QDialog::eventFilter(watched, event);
+    }
+    void moveBelow(int source, int target)
+    {
+        if (!cleanForAction() || source < 0 || target < 0 || source >= data.size() || target >= data.size() ||
+            source == target)
+            return;
+        auto ordered = data;
+        auto row = ordered.takeAt(source);
+        ordered.insert(target - (source < target ? 1 : 0) + 1, row);
+        if (auto *command = orderCommand(strip, ordered))
+            project->undoStack()->push(command);
+    }
+    void insertRow(int target)
+    {
+        if (!writable() || !cleanForAction())
+            return;
+        QSet<QString> labels;
+        for (const auto &r : data)
+            labels.insert(r.terminal->label());
+        QString label;
+        for (int i = 1;; ++i)
+        {
+            label = strip->name() + cfg.value("borna_delim").toString() + "R" + QString::number(i);
+            if (!labels.contains(label))
+                break;
+        }
+        ElementData info;
+        info.m_informations.addValue("label", label);
+        info.m_informations.addValue("manufacturer_reference", "RESERVA");
+        const int position =
+            target >= data.size() ? strip->physicalTerminalCount() : data[qMax(0, target)].physical->pos();
+        project->undoStack()->push(
+            new AddSpareTerminalsCommand(strip, position, {RealTerminal::createSpare(info)}));
+    }
+    void contextMenu(const QPoint &point)
+    {
+        const auto index = table->indexAt(point);
+        if (!index.isValid())
+            return;
+        if (!table->item(index.row(), index.column())->isSelected())
+        {
+            table->clearSelection();
+            table->setCurrentCell(index.row(), index.column());
+        }
+        else
+            table->setCurrentCell(index.row(), index.column(), QItemSelectionModel::NoUpdate);
+        if (index.column() == fieldColumn("peine") &&
+            data[index.row()].values.value("peine_grupo").toInt() > 0)
+        {
+            setCombSpan(index.row(), data[index.row()].values.value("peine_grupo").toInt() - 1);
+            return;
+        }
+        QMenu menu(this);
+        menu.setObjectName("TBEssentialMenu");
+        if (index.column() == fieldColumn("puente") || index.column() == fieldColumn("peine"))
+        {
+            const QString noun = index.column() == fieldColumn("puente")
+                                     ? QStringLiteral("puentes")
+                                     : QStringLiteral("contactos de peine");
+            for (bool on : {true, false})
+                menu.addAction(
+                    (on ? QStringLiteral("Pintar ") : QStringLiteral("Borrar ")) + noun, this,
+                    [this, on, index]()
+                    {
+                        paintColumn = index.column();
+                        paintValue = on;
+                        paintSticky = true;
+                        table->viewport()->setCursor(Qt::CrossCursor);
+                        status->setText(QStringLiteral(
+                            "Arrastra sobre la columna para pintar. Esc termina el modo de pintura."));
+                    });
+            menu.addSeparator();
+        }
+        menu.addAction(QStringLiteral("Copiar"), this,
+                       [this]()
+                       {
+                           copy(false);
+                       });
+        menu.addAction(QStringLiteral("Cortar"), this,
+                       [this]()
+                       {
+                           copy(true);
+                       });
+        menu.addAction(QStringLiteral("Pegar"), this,
+                       [this]()
+                       {
+                           paste();
+                       });
+        menu.addAction(QStringLiteral("Rellenar abajo"), this,
+                       [this]()
+                       {
+                           fill(false);
+                       });
+        auto *rowsMenu = menu.addMenu(QStringLiteral("Fila"));
+        rowsMenu->addAction(QStringLiteral("Insertar arriba"), this,
+                            [this, index]()
+                            {
+                                insertRow(index.row());
+                            });
+        rowsMenu->addAction(QStringLiteral("Insertar abajo"), this,
+                            [this, index]()
+                            {
+                                insertRow(index.row() + 1);
+                            });
+        rowsMenu->addAction(QStringLiteral("Mover debajo de…"), this,
+                            [this, index]()
+                            {
+                                moveSource = index.row();
+                                table->viewport()->setCursor(Qt::CrossCursor);
+                                status->setText(QStringLiteral("Selecciona la fila destino. Esc cancela."));
+                            });
+        rowsMenu->addAction(QStringLiteral("Duplicar como reserva"), this,
+                            [this]()
+                            {
+                                add(true);
+                            });
+        rowsMenu->addAction(QStringLiteral("Quitar del bornero"), this,
+                            [this]()
+                            {
+                                remove();
+                            });
+        menu.addAction(QStringLiteral("Ajustar columnas"), this,
+                       [this]()
+                       {
+                           table->resizeColumnsToContents();
+                       });
+        menu.exec(table->viewport()->mapToGlobal(point));
+    }
     void loadExceptions()
     {
         QSignalBlocker block(exceptions);
@@ -850,8 +1188,8 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         configDirty = true;
         buildConfig();
         refreshDraft();
-        status->setText(QStringLiteral(
-            "Excepciones INT/EXT actualizadas en la tabla. Pulsa Aplicar en QET para guardarlas."));
+        queueApply();
+        status->setText(QStringLiteral("Excepciones INT/EXT actualizadas en el proyecto."));
     }
     void addException()
     {
@@ -896,7 +1234,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         filter();
         decorate();
         table->verticalScrollBar()->setValue(position);
-        if (tabs->currentIndex() == 3)
+        if (tabs->currentIndex() == 2)
             drawPreview();
     }
     void decorate()
@@ -918,15 +1256,22 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         }
         QSet<RealTerminal *> comb;
         for (int i = 0; i < data.size(); ++i)
-            if (data[i].values.value("peine").toBool())
+            if (data[i].values.value("peine_grupo").toInt() > 0)
             {
-                int count = qMax(2, data[i].values.value("peine_grupo").toInt(2));
-                for (int j = i; j < data.size() && count > 0; ++j)
-                    if (data[j].values.value("nivel") == data[i].values.value("nivel"))
-                    {
-                        comb.insert(data[j].terminal.data());
-                        --count;
-                    }
+                int count = data[i].values.value("peine_grupo").toInt();
+                for (int j = i; j < data.size() && j < i + count; ++j)
+                    comb.insert(data[j].terminal.data());
+            }
+        QSet<int> bridgeCells;
+        for (int i = 0; i < data.size(); ++i)
+            if (data[i].values.value("puente").toBool())
+            {
+                bridgeCells.insert(i);
+                int j = i + 1;
+                while (j < data.size() && data[j].terminal->level() != data[i].terminal->level())
+                    ++j;
+                if (j < data.size())
+                    bridgeCells.insert(j);
             }
         int missing = 0, earth = 0;
         for (int row = 0; row < data.size(); ++row)
@@ -964,7 +1309,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                     paint(green);
                 if (field == "num_borna" && labels.value(v.value(field).toString()) > 1)
                     paint(purple);
-                if (field == "puente" && v.value("puente").toBool())
+                if (field == "puente" && bridgeCells.contains(row))
                     paint(green);
                 if (field == "reserva" && v.value("reserva").toBool())
                     paint(green);
@@ -975,9 +1320,9 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                     if (comb.contains(r.terminal.data()) || v.value("peine").toBool())
                         paint(orange);
                     const int count = v.value("peine_grupo").toInt();
-                    item->setText(count > 1 ? QString::number(count) : QString());
-                    item->setToolTip(QStringLiteral(
-                        "Peine nativo. Ajusta su tamaño en Herramientas de tabla → Tamaño del peine."));
+                    item->setText(count > 0 ? QString::number(count) : QString());
+                    item->setToolTip(QStringLiteral("Peine: clic izquierdo amplía y clic derecho reduce el "
+                                                    "tramo. Arrastra para pintar contactos."));
                 }
                 if (field == "color")
                 {
@@ -1042,8 +1387,9 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         refreshPending = true;
         if (dirty() || delegate->active)
         {
-            status->setText(QStringLiteral("El proyecto ha cambiado. Se conservan los cambios pendientes y "
-                                           "el texto que estás escribiendo; Aplicar comprueba conflictos."));
+            status->setText(
+                QStringLiteral("El proyecto ha cambiado. Se conservan los cambios pendientes y "
+                               "el texto que estás escribiendo; la edición comprueba conflictos."));
             return;
         }
         bool same = project->terminalStrip().size() == strips->count();
@@ -1089,6 +1435,8 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
     }
     void load(TerminalStrip *s)
     {
+        const bool rebuildConfig =
+            !keepConfig && (!configDialog->isVisible() || s != strip || cfg != settings(s));
         for (const auto &c : connections)
             disconnect(c);
         connections.clear();
@@ -1100,7 +1448,8 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         refreshPending = false;
         configDirty = false;
         fillTable();
-        buildConfig();
+        if (rebuildConfig)
+            buildConfig();
         loadExceptions();
         loading = false;
         filter();
@@ -1147,7 +1496,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                                        load(nullptr);
                                    });
         }
-        if (tabs->currentIndex() == 3)
+        if (tabs->currentIndex() == 2)
             drawPreview();
     }
     void fillTable()
@@ -1228,6 +1577,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            queueApply(300);
                             if (k == "external_name_exceptions")
                             {
                                 loadExceptions();
@@ -1250,6 +1600,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            queueApply(300);
                             if (k == "external_name_exceptions")
                             {
                                 loadExceptions();
@@ -1269,6 +1620,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                         {
                             cfg[k] = v;
                             configDirty = true;
+                            queueApply(300);
                             if (k == "external_name_exceptions")
                             {
                                 loadExceptions();
@@ -1281,6 +1633,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                 field = line;
                 field->setObjectName("TBConfig_" + k);
             }
+            field->setObjectName("TBConfig_" + k);
             form->addRow(captions.value(k, k), field);
         }
     }
@@ -1307,27 +1660,63 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         }
         return true;
     }
-    bool apply()
+    void queueApply(int delay = 0)
+    {
+        if (!loading && !applying)
+            liveTimer.start(delay);
+    }
+    bool apply(bool interactive = true)
     {
         if (!writable())
             return false;
+        liveTimer.stop();
         if (settings(strip) != loadedConfig)
         {
-            message(QStringLiteral("La configuración del bornero ha cambiado en otra ventana. Descarta y "
-                                   "vuelve a cargar antes de aplicar."));
+            if (interactive)
+                message(QStringLiteral("La configuración ha cambiado en otra ventana. Revisa el bornero."));
+            else
+                status->setText(
+                    QStringLiteral("La configuración ha cambiado en otra ventana; revisa los cambios."));
             return false;
         }
         QString error;
         std::unique_ptr<QUndoCommand> command(editCommand(strip, data, cfg, error));
         if (!error.isEmpty())
         {
-            message(error);
+            if (interactive)
+                message(error);
+            else
+            {
+                status->setText(error);
+                messages->setPlainText(error + "\n\n" + messages->toPlainText());
+            }
             return false;
         }
         applying = true;
+        QString currentId;
+        int column = table->currentColumn();
+        if (table->currentRow() >= 0 && table->currentRow() < data.size())
+            currentId = data[table->currentRow()].id;
+        QVector<QPair<QString, int>> selection;
+        for (auto *item : table->selectedItems())
+            if (item->row() < data.size())
+                selection.append({data[item->row()].id, item->column()});
+        int scroll = table->verticalScrollBar()->value(), horizontal = table->horizontalScrollBar()->value();
         if (command)
             project->undoStack()->push(command.release());
+        keepConfig = configDialog->isVisible();
         load(strip);
+        keepConfig = false;
+        for (int i = 0; i < data.size(); ++i)
+        {
+            if (data[i].id == currentId)
+                table->setCurrentCell(i, qMax(0, column));
+            for (const auto &cell : selection)
+                if (cell.first == data[i].id)
+                    table->item(i, cell.second)->setSelected(true);
+        }
+        table->verticalScrollBar()->setValue(scroll);
+        table->horizontalScrollBar()->setValue(horizontal);
         applying = false;
         return true;
     }
@@ -1527,6 +1916,21 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             }
         }
     }
+    void clearCells()
+    {
+        if (!writable())
+            return;
+        for (auto *item : table->selectedItems())
+        {
+            const auto col = columns[item->column()];
+            if (col.kind == 3)
+                continue;
+            if (col.kind == 1)
+                item->setCheckState(Qt::Unchecked);
+            else
+                item->setText(QString());
+        }
+    }
     void fill(bool right)
     {
         const auto ranges = table->selectedRanges();
@@ -1582,6 +1986,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             loadExceptions();
             configDirty = true;
             refreshDraft();
+            queueApply();
         }
         else
         {
@@ -1676,10 +2081,10 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         QDialog options(this);
         options.setWindowTitle(QStringLiteral("Recuperar historial"));
         auto *layout = new QVBoxLayout(&options);
-        layout->addWidget(
-            new QLabel(QStringLiteral("Las filas se vinculan por UUID o por bornero y número únicos.\nSe "
-                                      "recuperan ajustes en la tabla para revisarlos antes de Aplicar."),
-                       &options));
+        layout->addWidget(new QLabel(
+            QStringLiteral("Las filas se vinculan por UUID o por bornero y número únicos.\nSe "
+                           "recuperan ajustes directamente en el proyecto y permiten deshacerlos."),
+            &options));
         auto *manual = new QCheckBox(
             QStringLiteral("Restaurar también textos manuales de dispositivos, mangueras y cables"),
             &options);
@@ -1744,12 +2149,12 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             loadExceptions();
             configDirty = true;
             refreshDraft();
+            queueApply();
         }
-        status->setText(
-            QStringLiteral(
-                "Historial: %1 filas recuperadas; %2 sin coincidencia única. Revisa y pulsa Aplicar.")
-                .arg(matched)
-                .arg(unmatched));
+        status->setText(QStringLiteral("Historial: %1 filas recuperadas; %2 sin coincidencia única. Cambios "
+                                       "actualizados en el proyecto.")
+                            .arg(matched)
+                            .arg(unmatched));
     }
     void drawPreview()
     {
@@ -1774,6 +2179,8 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
     }
     void closeEvent(QCloseEvent *event) override
     {
+        if (dirty())
+            apply(false);
         if (dirty() && QMessageBox::question(
                            this, QStringLiteral("Cambios pendientes"),
                            QStringLiteral("¿Cerrar y descartar los cambios pendientes de la tabla?")) !=

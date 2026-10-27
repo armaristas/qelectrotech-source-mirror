@@ -70,7 +70,8 @@ QFont font(const QJsonObject &cfg, const QString &side)
     result.setBold(cfg.value("font_bold_" + side).toBool());
     return result;
 }
-void vertical(QPainter &p, QRectF &extent, qreal x, qreal y, const QString &text, const QFont &f, bool frame = false)
+void vertical(QPainter &p, QRectF &extent, qreal x, qreal y, const QString &text, const QFont &f,
+              bool frame = false)
 {
     if (text.isEmpty())
         return;
@@ -78,11 +79,11 @@ void vertical(QPainter &p, QRectF &extent, qreal x, qreal y, const QString &text
     p.setFont(f);
     p.translate(x, y);
     p.rotate(-90);
-    const auto box = QFontMetricsF(f,p.device()).boundingRect(text).adjusted(-2, -2, 2, 2);
-    extent=extent.united(p.worldTransform().mapRect(box));
+    const auto box = QFontMetricsF(f, p.device()).boundingRect(text).adjusted(-2, -2, 2, 2);
+    extent = extent.united(p.worldTransform().mapRect(box));
     p.drawText(QPointF(0, 0), text);
     if (frame)
-        p.drawRect(box);
+        p.drawRoundedRect(box, 3, 3);
     p.restore();
 }
 void ground(QPainter &p, qreal x, qreal y, int sign)
@@ -92,7 +93,8 @@ void ground(QPainter &p, qreal x, qreal y, int sign)
         p.drawLine(QPointF(x - 6 + i * 2, y + sign * (8 + i * 3)),
                    QPointF(x + 6 - i * 2, y + sign * (8 + i * 3)));
 }
-QVector<int> shieldRange(const QString &spec, const QVector<Row> &rows, const QString &side, const QString &separator)
+QVector<int> shieldRange(const QString &spec, const QVector<Row> &rows, const QString &side,
+                         const QString &separator)
 {
     QVector<int> result;
     const auto ends = spec.split('/');
@@ -148,16 +150,55 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
         while (last + 1 < all.size() && !all[last].values.value("corte").toBool())
             ++last;
         const auto segment = all.mid(offset, last - offset + 1);
+        struct HoseGroup
+        {
+            QString name;
+            QVector<int> members;
+        };
+        QMap<QString, QVector<HoseGroup>> hoses;
+        QMap<QString, QMap<int, int>> hoseIndex;
+        for (const auto &side : {QString("int"), QString("ext")})
+        {
+            const bool compact =
+                cfg.value("hose_group_mode").toString().compare("Compacta", Qt::CaseInsensitive) == 0;
+            QVector<HoseGroup> groups;
+            for (int i = 0; i < segment.size(); ++i)
+            {
+                const auto name = segment[i].values.value("mang_" + side).toString().trimmed();
+                if (name.isEmpty())
+                    continue;
+                int found = -1;
+                for (int g = 0; g < groups.size(); ++g)
+                    if (groups[g].name == name && (compact || groups[g].members.last() == i - 1))
+                    {
+                        found = g;
+                        break;
+                    }
+                if (found < 0)
+                {
+                    groups.append({name, {}});
+                    found = groups.size() - 1;
+                }
+                groups[found].members << i;
+            }
+            for (const auto &group : groups)
+                if (group.members.size() > 1)
+                {
+                    int g = hoses[side].size();
+                    hoses[side] << group;
+                    for (int i : group.members)
+                        hoseIndex[side][i] = g;
+                }
+        }
         qreal maxText = 80;
         p.save();
         p.setBrush(Qt::NoBrush);
-        p.drawRoundedRect(QRectF(x0-50,baseline-60,44,120),10,10);
-        p.drawRect(QRectF(x0-6,baseline-35,6,70));
+        p.drawRoundedRect(QRectF(x0 - 50, baseline - 60, 44, 120), 10, 10);
+        p.drawRect(QRectF(x0 - 6, baseline - 35, 6, 70));
         p.setPen(QColor("#636363"));
-        vertical(p, textExtent,x0-43,baseline+17,strip?strip->name():QString(),QFont("Arial",15));
+        vertical(p, textExtent, x0 - 43, baseline + 17, strip ? strip->name() : QString(),
+                 QFont("Arial", 15));
         p.restore();
-        QMap<QUuid, QVector<int>> bridgeGroups;
-        QMap<QUuid, QColor> bridgeColors;
         for (int i = 0; i < segment.size(); ++i)
         {
             const auto &row = segment[i];
@@ -174,15 +215,11 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
                 const auto pair = colors(row, cfg);
                 if (pair.first.isValid())
                 {
-                    p.fillRect(body, pair.first);
+                    const QRectF band(x, baseline - 90, step, 45);
+                    p.fillRect(band, pair.first);
                     if (pair.second.isValid())
                     {
-                        p.save();
-                        p.setClipRect(body);
-                        p.setPen(QPen(pair.second, 4));
-                        for (qreal sy = baseline - 110; sy < baseline + 110; sy += 10)
-                            p.drawLine(QPointF(x, sy), QPointF(x + step, sy + step));
-                        p.restore();
+                        p.fillRect(QRectF(x + step / 2, baseline - 90, step / 2, 45), pair.second);
                     }
                 }
             }
@@ -211,6 +248,8 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
                 const qreal center = doubled ? x + step : cx;
                 p.drawEllipse(QPointF(center, baseline - 30), 2, 2);
                 p.drawEllipse(QPointF(center, baseline - 10), 2, 2);
+                if (ElementData::terminalTypeFromString(v.value("tipo_borna").toString()) == ElementData::TTGeneric)
+                    p.drawLine(QPointF(center, baseline - 28), QPointF(center, baseline - 12));
                 const qreal levelOffset = multi && !doubled ? row.terminal->level() * 10 : 0;
                 TerminalStripDrawer::Helpers::drawTypeSymbol(
                     &p, QRectF(center - 5, baseline - 27 - levelOffset, 10, 14),
@@ -233,15 +272,30 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
             if (!previous)
                 vertical(p, textExtent, x + 6, baseline + 40, v.value("modelo").toString(), modelFont);
             if (v.value("reserva").toBool())
-                vertical(p, textExtent, x + step - 2, baseline + 105, "R", numberFont);
-            if (row.terminal && row.terminal->bridge())
             {
-                auto bridge = row.terminal->bridge();
-                bridgeGroups[bridge->uuid()] << i;
-                bridgeColors[bridge->uuid()] = bridge->color();
+                const bool external = !v.value("disp_ext").toString().isEmpty(),
+                           internal = !v.value("disp_int").toString().isEmpty();
+                const int sign = external && !internal ? -1 : 1;
+                if (!external || !internal)
+                {
+                    p.drawLine(QPointF(cx, baseline + sign * 90), QPointF(cx, baseline + sign * 110));
+                    vertical(p, textExtent, x, baseline + sign * 132, "R", numberFont);
+                }
             }
-            else if (v.value("puente").toBool() && i + 1 < segment.size())
-                bridgeGroups[QUuid::createUuid()] = {i, i + 1};
+            int jumperEnd = i + 1;
+            while (jumperEnd < segment.size() && row.terminal && segment[jumperEnd].terminal &&
+                   row.terminal->level() != segment[jumperEnd].terminal->level())
+                ++jumperEnd;
+            if (v.value("puente").toBool() && jumperEnd < segment.size())
+            {
+                const qreal endX = x0 + jumperEnd * step + step / 2;
+                p.save();
+                p.setPen(QPen(Qt::red, 1.6));
+                p.drawRect(QRectF(cx - 1, baseline - 16, 2, 2));
+                p.drawLine(QPointF(cx, baseline - 15), QPointF(endX, baseline - 15));
+                p.drawRect(QRectF(endX - 1, baseline - 16, 2, 2));
+                p.restore();
+            }
             for (const auto &side : {QString("int"), QString("ext")})
             {
                 const int sign = side == "int" ? -1 : 1;
@@ -252,80 +306,85 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
                 if (device.isEmpty() && wire.isEmpty() && hose.isEmpty())
                     continue;
                 const qreal end = origin + sign * total;
-                p.drawLine(QPointF(cx, origin), QPointF(cx, end));
-                const qreal cableLen = qMax(0.0, cfg.value("cable_line_len_" + side).toDouble(100));
-                const qreal hoseLen = qMax(0.0, cfg.value("hose_line_len_" + side).toDouble(50));
-                p.drawLine(QPointF(cx - 2, origin + sign * cableLen),
-                           QPointF(cx + 2, origin + sign * cableLen));
-                p.drawLine(QPointF(cx - 2, end - sign * hoseLen), QPointF(cx + 2, end - sign * hoseLen));
-                vertical(p, textExtent, cx - 2, origin + sign * near + cfg.value("cable_text_offset_" + side).toDouble(),
-                         wire, wireFont);
-                const qreal shift = cfg.value("offset_" + side).toDouble();
-                const auto f = font(cfg, side);
-                const qreal measured = QFontMetricsF(f).horizontalAdvance(device);
-                const qreal advance =
-                    qMax(measured, device.size() * qMax(0.0, cfg.value("char_adv_ext").toDouble(5.2)));
-                maxText = qMax(maxText, advance + qAbs(shift));
-                vertical(p, textExtent, x + 2, end + sign * 10 + shift + (sign < 0 ? 0 : advance), device, f,
-                         cfg.value("draw_frame").toBool());
-                if (!hose.isEmpty())
-                    vertical(p, textExtent, cx + 3,
-                             origin + sign * (near + hoseLength / 2) +
-                                 cfg.value("hose_text_offset_" + side).toDouble(),
+                const bool grouped = hoseIndex[side].contains(i);
+                const bool hasHose = !hose.isEmpty() && !device.isEmpty();
+                const bool compact =
+                    cfg.value("hose_group_mode").toString().compare("Compacta", Qt::CaseInsensitive) == 0;
+                const qreal shift = grouped && compact ? hoseIndex[side].value(i) * 10 : 0;
+                const qreal barA = origin + sign * (near + shift), barB = barA + sign * hoseLength;
+                const bool pe = device.trimmed() == "PE";
+                if (pe)
+                {
+                    if (cfg.value("draw_ground_line").toBool())
+                        ground(p, cx, end, sign);
+                    p.drawLine(QPointF(cx, origin), QPointF(cx, end));
+                }
+                else if (grouped)
+                {
+                    p.drawLine(QPointF(cx, origin), QPointF(cx, barA));
+                    p.drawLine(QPointF(cx, barB), QPointF(cx, end));
+                }
+                else
+                    p.drawLine(QPointF(cx, origin), QPointF(cx, end));
+                const qreal wireY = ((hasHose || grouped ? barB : origin) + end) / 2 +
+                                    cfg.value("cable_text_offset_" + side).toDouble() * (sign < 0 ? 1 : -1);
+                if (!wire.isEmpty())
+                    vertical(p, textExtent, x - 4, wireY, wire, QFont("Arial", 6));
+                if (hasHose && !grouped)
+                    vertical(p, textExtent, x - 5,
+                             (barA + barB) / 2 +
+                                 cfg.value("hose_text_offset_" + side).toDouble() * (sign < 0 ? 1 : -1),
                              hose, hoseFont);
-                if (device.split(" & ").contains("PE"))
-                    ground(p, cx, end, sign);
+                const auto f = font(cfg, side);
+                const qreal advance = QFontMetricsF(f, p.device()).horizontalAdvance(" " + device + " ");
+                maxText = qMax(maxText, advance + qAbs(cfg.value("offset_" + side).toDouble()));
+                if (!device.isEmpty())
+                    vertical(p, textExtent, x + 2,
+                             end + (sign < 0 ? 0 : advance + 6) + cfg.value("offset_" + side).toDouble(),
+                             pe ? device : " " + device + " ", f, !pe);
             }
         }
-        for (auto bridge = bridgeGroups.begin(); bridge != bridgeGroups.end(); ++bridge)
+        for (int anchor = 0; anchor < segment.size(); ++anchor)
         {
-            const auto indices = bridge.value();
-            if (!indices.isEmpty())
-            {
-                p.save();
-                p.setPen(QPen(bridgeColors.value(bridge.key(), Qt::red), 1.6));
-                for (int i : indices)
-                    p.drawEllipse(QPointF(x0 + i * step + step / 2, baseline - 20), 1.5, 1.5);
-                p.drawLine(QPointF(x0 + indices.first() * step + step / 2, baseline - 20),
-                           QPointF(x0 + indices.last() * step + step / 2, baseline - 20));
-                // The other end may be in another cut of the same strip.
-                // Keep its bridge contact visible at the cut boundary.
-                if(indices.size()==1)p.drawLine(QPointF(x0+indices.first()*step+step/2,baseline-20),QPointF(x0+(indices.first()+1)*step,baseline-20));
-                p.restore();
-            }
+            const int count = segment[anchor].values.value("peine_grupo").toInt();
+            if (count <= 0)
+                continue;
+            QVector<int> active;
+            for (int i = anchor; i < qMin(int(segment.size()), anchor + count); ++i)
+                if (segment[i].values.value("peine").toBool() ||
+                    (i > anchor && segment[i].values.value("peine_grupo").toInt() == 0))
+                    active << i;
+            p.save();
+            p.setPen(QPen(QColor("orange"), 1.5));
+            for (int i : active)
+                p.drawLine(QPointF(x0 + i * step + step / 2, baseline - 90),
+                           QPointF(x0 + (i + 1) * step, baseline - 100));
+            if (active.size() > 1)
+                p.drawLine(QPointF(x0 + (active.first() + 1) * step, baseline - 100),
+                           QPointF(x0 + (active.last() + 1) * step, baseline - 100));
+            p.restore();
         }
-        // Group hoses on each side independently, contiguous or compact.
+        // Hoses use the two horizontal buses and central stem of v5.6.
         for (const auto &side : {QString("int"), QString("ext")})
         {
-            QMap<QString, QVector<int>> groups;
-            QString previous;
-            int run = 0;
-            for (int i = 0; i < segment.size(); ++i)
-            {
-                const auto hose = segment[i].values.value("mang_" + side).toString();
-                if (hose != previous)
-                    ++run;
-                previous = hose;
-                if (hose.isEmpty())
-                    continue;
-                const auto group =
-                    cfg.value("hose_group_mode").toString().compare("Compacta", Qt::CaseInsensitive) == 0
-                        ? hose
-                        : QString::number(run) + ":" + hose;
-                groups[group] << i;
-            }
             const int sign = side == "int" ? -1 : 1;
-            for (const auto &indices : groups)
-                if (indices.size() > 1)
-                {
-                    const qreal a = x0 + indices.first() * step + step / 2,
-                                b = x0 + indices.last() * step + step / 2,
-                                y = baseline + sign * (90 + near + hoseLength / 2);
-                    p.save();
-                    p.setBrush(Qt::NoBrush);
-                    p.drawRoundedRect(QRectF(a - 5, y - 7, b - a + 10, 14), 4, 4);
-                    p.restore();
-                }
+            const bool compact =
+                cfg.value("hose_group_mode").toString().compare("Compacta", Qt::CaseInsensitive) == 0;
+            for (int g = 0; g < hoses[side].size(); ++g)
+            {
+                const auto &group = hoses[side][g];
+                const qreal a = x0 + group.members.first() * step + step / 2,
+                            b = x0 + group.members.last() * step + step / 2, m = (a + b) / 2;
+                const qreal yA = baseline + sign * (90 + near + (compact ? g * 10 : 0)),
+                            yB = yA + sign * hoseLength;
+                p.drawLine(QPointF(a, yA), QPointF(b, yA));
+                p.drawLine(QPointF(a, yB), QPointF(b, yB));
+                p.drawLine(QPointF(m, yA), QPointF(m, yB));
+                vertical(p, textExtent, m - 5,
+                         (compact ? yB : (yA + yB) / 2) +
+                             cfg.value("hose_text_offset_" + side).toDouble() * (sign < 0 ? 1 : -1),
+                         group.name, hoseFont);
+            }
             if (cfg.value("draw_shield_symbol").toBool())
                 for (int i = 0; i < segment.size(); ++i)
                 {
@@ -337,32 +396,30 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
                         specs << v.value("mang_" + side).toString();
                     for (const auto &spec : specs)
                     {
-                        auto indices = shieldRange(spec.trimmed(), segment, side, cfg.value("multilevel_sep").toString(QString::fromUtf8("·")));
+                        auto indices =
+                            shieldRange(spec.trimmed(), segment, side,
+                                        cfg.value("multilevel_sep").toString(QString::fromUtf8("·")));
                         if (indices.isEmpty())
                             indices << i;
                         const qreal a = x0 + indices.first() * step, b = x0 + (indices.last() + 1) * step,
                                     y = baseline + sign * 130;
-                        p.drawEllipse(QRectF(a - 2, y - 7, b - a + 4, 14));
-                        p.drawLine(QPointF(x0 + i * step + step / 2, baseline + sign * 90),
-                                   QPointF(x0 + i * step + step / 2, y));
-                        ground(p, b + 8, y, sign);
+                        p.save();
+                        p.setPen(QPen(Qt::black, 0.8, Qt::DashLine));
+                        p.drawEllipse(QRectF(a + 1, y - 7, qMax(18.0, b - a - 2), 14));
+                        const qreal owner = x0 + i * step + step / 2,
+                                    edge = owner >= (a + b) / 2 ? b - 1 : a + 1;
+                        p.drawLine(QPointF(edge, y), QPointF(owner, y));
+                        p.drawLine(QPointF(owner, y), QPointF(owner, baseline + sign * 90));
+                        p.restore();
                     }
                 }
         }
-        if (cfg.value("draw_ground_line").toBool())
+        if (cfg.value("draw_frame").toBool())
         {
-            QVector<int> pe;
-            for (int i = 0; i < segment.size(); ++i)
-                if (segment[i].values.value("tipo_borna").toString() == "ground")
-                    pe << i;
-            if (!pe.isEmpty())
-            {
-                p.save();
-                p.setPen(QPen(QColor("#23852a"), 1.5));
-                p.drawLine(QPointF(x0 + pe.first() * step, baseline + 75),
-                           QPointF(x0 + (pe.last() + 1) * step, baseline + 75));
-                p.restore();
-            }
+            p.save();
+            p.setPen(QPen(QColor("#777777"), 0.6, Qt::DashLine));
+            p.drawRoundedRect(QRectF(x0 - 55, baseline - 95, 55 + segment.size() * step, 210), 6, 6);
+            p.restore();
         }
         baseline += 180 + 2 * total + 2 * maxText + 100;
         offset = last + 1;
@@ -416,7 +473,10 @@ Cache *cache(TerminalStrip *strip)
     return result;
 }
 } // namespace
-QPair<QColor,QColor> terminalColors(const Row &row,const QJsonObject &config){return colors(row,config);}
+QPair<QColor, QColor> terminalColors(const Row &row, const QJsonObject &config)
+{
+    return colors(row, config);
+}
 QRectF render(QPainter *painter, TerminalStrip *strip, const QVector<Row> &data, const QJsonObject &config)
 {
     const auto drawing = picture(strip, data, config);

@@ -357,12 +357,50 @@ QVector<Row> rows(TerminalStrip *strip, const QJsonObject &given)
                     else
                         v.insert(field, QJsonValue::fromVariant(value));
                 }
-            if (!real->isBridged())
-                v.insert("peine", false);
             if (v.value("color").toString().isEmpty())
                 v.insert("color", "Auto");
             result << row;
         }
+    for (int i = 0; i < result.size(); ++i)
+    {
+        const int count = result[i].values.value("peine_grupo").toInt();
+        if (count <= 0)
+            continue;
+        int active = 0;
+        for (int j = i; j < qMin(i + count, int(result.size())); ++j)
+        {
+            const bool legacy = j > i && result[j].values.value("peine_grupo").toInt() == 0;
+            if (legacy && result[j].terminal->bridge() &&
+                result[j].terminal->bridge() == result[i].terminal->bridge())
+                result[j].values["peine"] = true;
+            if (result[j].values.value("peine").toBool())
+                ++active;
+        }
+        if (active > 1)
+            for (int j = i; j < qMin(i + count, int(result.size())); ++j)
+                if (!result[j].terminal->isBridged())
+                    result[j].values["peine"] = false;
+    }
+    // A bridge cell describes the link to the next terminal, not membership
+    // of an entire electrical group. Comb contacts have their own metadata.
+    for (int i = 0; i < result.size(); ++i)
+    {
+        auto &r = result[i];
+        bool link = false;
+        int next = i + 1;
+        while (next < result.size() && result[next].terminal->level() != r.terminal->level())
+            ++next;
+        if (next < result.size() && r.terminal->bridge() &&
+            r.terminal->bridge() == result[next].terminal->bridge())
+        {
+            bool comb = false;
+            for (const auto &member : r.terminal->bridge()->realTerminals())
+                comb |= member->terminalData().m_informations.value(key("peine")).toBool();
+            const auto info = r.before.m_informations;
+            link = info.contains(key("link_next")) ? info.value(key("link_next")).toBool() : !comb;
+        }
+        r.values["puente"] = link;
+    }
     return result;
 }
 
@@ -536,10 +574,10 @@ class BridgesCommand final : public QUndoCommand
         for (auto &b : state)
         {
             if (b.bridge)
-                strip->setBridge(b.bridge, b.members);
+                strip->setBridge(b.bridge, b.members, true);
             else
             {
-                strip->setBridge(b.members);
+                strip->setBridge(b.members, true);
                 b.bridge = strip->isBridged(b.members.first());
             }
         }
@@ -573,7 +611,7 @@ class RemoveCommand final : public QUndoCommand
     void restore(const QVector<BridgeState> &state)
     {
         for (const auto &b : state)
-            strip->setBridge(b.bridge, b.members);
+            strip->setBridge(b.bridge, b.members, true);
     }
 
   public:
@@ -725,72 +763,119 @@ QUndoCommand *editCommand(TerminalStrip *strip, const QVector<Row> &edited, cons
             error = tr("Una borna pertenece a un folio de solo lectura.");
             return nullptr;
         }
-    auto plannedBridges = bridges(strip);
+    QVector<BridgeState> plannedBridges;
+    QSet<QUuid> graphTouched;
     bool bridgeEdited = false;
     for (const auto &r : edited)
+        bridgeEdited |=
+            r.edits.contains("puente") || r.edits.contains("peine") || r.edits.contains("peine_grupo");
+    auto effective = rows(strip, config);
+    for (auto &r : effective)
+        for (const auto &edit : edited)
+            if (edit.terminal == r.terminal)
+            {
+                for (auto it = edit.edits.begin(); it != edit.edits.end(); ++it)
+                    r.values[it.key()] = it.value();
+                break;
+            }
+    if (bridgeEdited)
     {
-        const bool touched = r.edits.contains("puente") || r.edits.contains("peine") ||
-                             (r.edits.contains("peine_grupo") && r.values.value("peine").toBool());
-        if (!touched)
-            continue;
-        bridgeEdited = true;
-        const bool comb = r.edits.contains("peine") || r.values.value("peine").toBool();
-        const bool off = (r.edits.contains("puente") && !r.edits.value("puente").toBool()) ||
-                         (r.edits.contains("peine") && !r.edits.value("peine").toBool());
-        const bool on = !off && (comb ? r.values.value("peine").toBool() : r.edits.value("puente").toBool());
-        TerminalGroup group;
-        if (on)
+        QVector<int> parent(effective.size());
+        for (int i = 0; i < parent.size(); ++i)
+            parent[i] = i;
+        auto root = [&](int n)
         {
-            const int count = comb ? qMax(2, r.values.value("peine_grupo").toInt(2)) : 2;
-            const int start = current.indexOf(r.terminal);
-            for (int i = start; i < current.size() && group.size() < count; ++i)
-                if (current[i]->level() == r.terminal->level())
-                    group << current[i];
-            if (group.size() != count)
-            {
-                error = tr("El puente o peine supera el final del bornero.");
-                return nullptr;
-            }
-        }
-        for (int i = plannedBridges.size() - 1; i >= 0; --i)
+            while (parent[n] != n)
+                n = parent[n];
+            return n;
+        };
+        auto unite = [&](int a, int b)
         {
-            auto &old = plannedBridges[i];
-            bool overlap = old.members.contains(r.terminal);
-            if (on)
-                for (const auto &real : group)
-                    overlap |= old.members.contains(real);
-            if (!overlap)
-                continue;
-            if (on && !comb)
+            parent[root(b)] = root(a);
+        };
+        // Native bridges can be sparse and may have no GNerador annotations.
+        // An edit elsewhere must preserve their exact membership.
+
+        for (const auto &edit : edited)
+            if (edit.edits.contains("puente") || edit.edits.contains("peine") ||
+                edit.edits.contains("peine_grupo"))
+                if (edit.terminal->bridge())
+                    graphTouched.insert(edit.terminal->bridge()->uuid());
+        QMap<QUuid, int> nativeFirst;
+        for (int i = 0; i < effective.size(); ++i)
+            if (auto bridge = effective[i].terminal->bridge();
+                bridge && !graphTouched.contains(bridge->uuid()))
             {
-                for (const auto &real : old.members)
-                    if (!group.contains(real))
-                        group << real;
+                if (nativeFirst.contains(bridge->uuid()))
+                    unite(nativeFirst.value(bridge->uuid()), i);
+                else
+                    nativeFirst[bridge->uuid()] = i;
             }
-            else if (!comb)
+        for (int i = 0; i < effective.size(); ++i)
+            if (effective[i].values.value("puente").toBool())
             {
-                old.members.removeAll(r.terminal);
-                if (old.members.size() >= 2)
-                    continue;
-            }
-            plannedBridges.removeAt(i);
-        }
-        if (on)
-        {
-            std::sort(group.begin(), group.end(),
-                      [](const auto &a, const auto &b)
-                      {
-                          return a->physicalTerminal()->pos() < b->physicalTerminal()->pos();
-                      });
-            for (int i = 0; i < group.size(); ++i)
-                if (group[i]->level() != group.first()->level() ||
-                    (i && group[i]->physicalTerminal()->pos() != group[i - 1]->physicalTerminal()->pos() + 1))
+                int j = i + 1;
+                while (j < effective.size() &&
+                       effective[j].terminal->level() != effective[i].terminal->level())
+                    ++j;
+                if (j == effective.size() || effective[j].physical->pos() != effective[i].physical->pos() + 1)
                 {
-                    error = tr("Los puentes requieren bornas consecutivas y del mismo nivel.");
+                    error = tr("El puente necesita la siguiente borna del mismo nivel.");
                     return nullptr;
                 }
-            plannedBridges.append({{}, group});
+                unite(i, j);
+            }
+        for (int i = 0; i < effective.size(); ++i)
+        {
+            const int count = effective[i].values.value("peine_grupo").toInt();
+            if (count <= 0)
+                continue;
+            if (i + count > effective.size())
+            {
+                error = tr("El peine supera el final del bornero.");
+                return nullptr;
+            }
+            int first = -1;
+            for (int j = i; j < i + count; ++j)
+            {
+                const bool legacy = j > i && effective[j].values.value("peine_grupo").toInt() == 0;
+                if (!effective[j].values.value("peine").toBool() && !legacy)
+                    continue;
+                if (effective[j].terminal->level() != effective[i].terminal->level() ||
+                    (j > i && effective[j].physical == effective[i].physical))
+                {
+                    error =
+                        tr("Los contactos del peine deben pertenecer a bornas distintas del mismo nivel.");
+                    return nullptr;
+                }
+                if (first < 0)
+                    first = j;
+                else
+                    unite(first, j);
+            }
         }
+        QMap<int, TerminalGroup> groups;
+        for (int i = 0; i < parent.size(); ++i)
+            groups[root(i)] << effective[i].terminal;
+        const auto existing = bridges(strip);
+        for (const auto &members : groups)
+            if (members.size() > 1)
+            {
+                QSharedPointer<TerminalStripBridge> preserved;
+                for (const auto &previous : existing)
+                    if (previous.members.size() == members.size())
+                    {
+                        bool same = true;
+                        for (const auto &member : members)
+                            same &= previous.members.contains(member);
+                        if (same)
+                        {
+                            preserved = previous.bridge;
+                            break;
+                        }
+                    }
+                plannedBridges.append({preserved, members});
+            }
     }
     auto macro = std::make_unique<QUndoCommand>(tr("GNerador TB: editar bornero"));
     const auto encoded = encode(config);
@@ -799,9 +884,27 @@ QUndoCommand *editCommand(TerminalStrip *strip, const QVector<Row> &edited, cons
                                  macro.get());
     for (const auto &r : edited)
     {
-        if (r.edits.isEmpty())
+        const bool affectedBridge =
+            bridgeEdited &&
+            (r.edits.contains("puente") || r.edits.contains("peine") || r.edits.contains("peine_grupo") ||
+             (r.terminal->bridge() && graphTouched.contains(r.terminal->bridge()->uuid())));
+        if (r.edits.isEmpty() && !affectedBridge)
             continue;
-        auto data = r.before;
+        if (affectedBridge && r.terminal->element() && r.terminal->element()->diagram() &&
+            r.terminal->element()->diagram()->isReadOnly())
+        {
+            error = tr("El puente afecta a una borna de un folio de solo lectura.");
+            return nullptr;
+        }
+        auto data = r.edits.isEmpty() ? r.terminal->terminalData() : r.before;
+        if (affectedBridge)
+            for (const auto &proposal : effective)
+                if (proposal.terminal == r.terminal)
+                {
+                    data.m_informations.addValue(key("link_next"), proposal.values.value("puente").toBool(),
+                                                 false);
+                    break;
+                }
         for (auto change = r.edits.begin(); change != r.edits.end(); ++change)
         {
             const auto field = change.key();
@@ -885,7 +988,7 @@ QUndoCommand *editCommand(TerminalStrip *strip, const QVector<Row> &edited, cons
                     data.m_informations.addValue(key(field), change.value().toVariant(), false);
             }
         }
-        if (data != r.before)
+        if (data != r.terminal->terminalData())
         {
             if (auto *element = r.terminal->element())
                 new ChangeElementDataCommand(element, data, macro.get());

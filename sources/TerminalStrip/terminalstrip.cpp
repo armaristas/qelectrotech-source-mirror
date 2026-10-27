@@ -683,10 +683,11 @@ bool TerminalStrip::setLevel(const QSharedPointer<RealTerminal> &real_terminal, 
  * To be bridgeable, each real terminal must belong to this terminal strip
  * be at the same level, be consecutive and not belong to the same physicalTerminal
  * and at least one terminal must be not bridged
+ * @param allow_gaps Permit sparse contacts of a comb; levels and physical uniqueness still apply.
  * @param real_terminals : a vector of realterminal
  * @return
  */
-bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &real_terminals) const
+bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps) const
 {
 	if (real_terminals.size() < 2) {
 		return false;
@@ -694,7 +695,7 @@ bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &re
 
 		// Check if first terminal belong to this strip
 	const auto first_real_terminal = real_terminals.first();
-	if (!first_real_terminal) {
+	if (!first_real_terminal || first_real_terminal->parentStrip() != this) {
 		return false;
 	}
 
@@ -715,7 +716,7 @@ bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &re
 	{
 			// If belong to this strip
 		const auto real_terminal = real_terminals.at(i);
-		if (!real_terminal) {
+		if (!real_terminal || real_terminal->parentStrip() != this) {
 			return false;
 		}
 
@@ -751,7 +752,7 @@ bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &re
 		// Check if concecutive
 	const auto count_ = pos_vector.size();
 	const auto min_max = std::minmax_element(pos_vector.constBegin(), pos_vector.constEnd());
-	if ((*min_max.second - *min_max.first) + 1 != count_) {
+	if (!allow_gaps && (*min_max.second - *min_max.first) + 1 != count_) {
 		return false;
 	}
 
@@ -765,7 +766,7 @@ bool TerminalStrip::isBridgeable(const QVector<QSharedPointer<RealTerminal>> &re
  * @param real_terminals
  * @return true if can be bridged.
  */
-bool TerminalStrip::isBridgeable(QSharedPointer<TerminalStripBridge> bridge, const QVector<QSharedPointer<RealTerminal> > &real_terminals) const
+bool TerminalStrip::isBridgeable(QSharedPointer<TerminalStripBridge> bridge, const QVector<QSharedPointer<RealTerminal> > &real_terminals, bool allow_gaps) const
 {
 	if (real_terminals.isEmpty() ||
 		!m_bridge.contains(bridge)) {
@@ -775,7 +776,7 @@ bool TerminalStrip::isBridgeable(QSharedPointer<TerminalStripBridge> bridge, con
 	auto vector_ = bridge->realTerminals();
 	vector_.append(real_terminals);
 
-	return isBridgeable(vector_);
+	return isBridgeable(vector_, allow_gaps);
 }
 
 /**
@@ -784,9 +785,9 @@ bool TerminalStrip::isBridgeable(QSharedPointer<TerminalStripBridge> bridge, con
  * @sa TerminalStrip::isBridgeable
  * @return true if bridge was successfully created
  */
-bool TerminalStrip::setBridge(const QVector<QSharedPointer<RealTerminal>> &real_terminals)
+bool TerminalStrip::setBridge(const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps)
 {
-	if (!isBridgeable(real_terminals)) {
+	if (!isBridgeable(real_terminals, allow_gaps)) {
 		return false;
 	}
 
@@ -813,11 +814,11 @@ bool TerminalStrip::setBridge(const QVector<QSharedPointer<RealTerminal>> &real_
  * @param real_terminals_data
  * @return true if all RealTerminal was successfully bridged
  */
-bool TerminalStrip::setBridge(const QSharedPointer<TerminalStripBridge> &bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals)
+bool TerminalStrip::setBridge(const QSharedPointer<TerminalStripBridge> &bridge, const QVector<QSharedPointer<RealTerminal>> &real_terminals, bool allow_gaps)
 {
 	if (bridge)
 	{
-		if (!isBridgeable(bridge, real_terminals)) {
+		if (!isBridgeable(bridge, real_terminals, allow_gaps)) {
 			return false;
 		}
 
@@ -878,10 +879,12 @@ bool TerminalStrip::canUnBridge(const QVector<QSharedPointer<RealTerminal> > &re
 			}
 		}
 
-			//Check if consecutive
+        // A whole sparse comb can be removed atomically. Partial removal
+        // retains the native consecutive-edge restriction.
 		const auto count_ = sorted_terminal.size();
 		const auto min_max = std::minmax_element(sorted_terminal.keyBegin(), sorted_terminal.keyEnd());
-		if ((*min_max.second - *min_max.first) + 1 != count_) {
+		if (count_ != compar_bridge->realTerminals().size() &&
+            (*min_max.second - *min_max.first) + 1 != count_) {
 			return false;
 		}
 
