@@ -13,16 +13,17 @@ Integrar Terminal_Flow, GNerador_Flechas, GNerador_TB, Marker_Pro y 4Mateo en QE
 - Terminal Flow portado a C++ dentro de la ventana existente de numeración automática de bornes: diagnóstico, configuración por bornero, multipunto, rangos, vista previa y comandos nativos de deshacer. Compilación y pruebas de integración verificadas. Véase [uso y alcance](TERMINAL_FLOW.md).
 - Entorno localizado: Qt 6.11.1, MinGW 13.1, CMake y Ninja bajo `C:/Qt`. Submódulos y dependencias de compilación preparados. Las 14 pruebas del motor de Terminal Flow han pasado.
 - GNerador_Flechas portado a campos dinámicos de QET con resolución de cadenas, selección de destinos y opción automática por proyecto. Compilación y pruebas de integración verificadas. Véase [uso y alcance](FLECHAS.md).
-- GNerador_TB, Marker_Pro y 4Mateo siguen pendientes de portar.
+- GNerador_TB integrado sobre los borneros y planes nativos: tabla, INT/EXT, actualización desde el proyecto, puentes/peines, niveles/dobles, reservas, presentación, configuración e historial Excel. Véase [uso y alcance](GNERADOR_TB.md).
+- Marker_Pro y 4Mateo siguen pendientes de portar.
 - No se ha publicado una versión ni se han enviado cambios al proyecto oficial.
 
 ## Verificación realizada
 
 En Windows, con Qt 6.11.1 y MinGW 13.1: compilación completa correcta; `qelectrotech.exe --version` devuelve `0.200.1-dev` y código 0. SQLite 3.54.1 compilado localmente desde el archivo oficial, verificado contra su SHA3-256 publicado, con las API de serialización comprobadas durante la configuración.
 
-CTest: **5/5 baterías correctas, 0 fallos**, en 52,73 segundos: `tst_terminalflow`, `tst_terminalflowproject`, `tst_arrowtexts`, `tst_terminalcableauto` y `tst_terminallabeldisplay`. Incluyen lectura de cambios sin guardar, planificación sin modificar el proyecto, colisiones, bloqueo y solo lectura, fórmulas, deshacer/rehacer, persistencia, conservación de propiedades de conductores, flechas en cadena y ciclos. La ventana de Terminal Flow se ha renderizado y revisado.
+CTest: **6/6 baterías correctas, 0 fallos**, en 37,42 segundos: `tst_terminalflow`, `tst_terminalflowproject`, `tst_arrowtexts`, `tst_gneradortb`, `tst_terminalcableauto` y `tst_terminallabeldisplay`. Incluyen lectura de cambios sin guardar, planificación sin modificar el proyecto, colisiones, bloqueo y solo lectura, fórmulas, deshacer/rehacer, persistencia, conservación de propiedades de conductores, flechas en cadena y ciclos. Las 15 comprobaciones de GNerador TB también cubren conexiones entre folios, conservación de ajustes manuales, puentes/peines, reservas, multinivel, dobles, persistencia y XLSX. Las ventanas de Terminal Flow y GNerador TB y el plano generado se han renderizado y revisado. El XLSX exportado se ha abierto además con openpyxl para comprobar su compatibilidad.
 
-Esta verificación automatizada no equivale a validar todavía todo el flujo de trabajo sobre los proyectos reales del usuario. Las otras tres herramientas siguen pendientes; esta es una primera versión de desarrollo con dos integraciones.
+Esta verificación automatizada no equivale a validar todavía todo el flujo de trabajo sobre los proyectos reales del usuario. Marker_Pro y 4Mateo siguen pendientes. La validación de la ampliación GNerador TB se recoge en su documentación.
 
 ## Puntos de integración comprobados en el código
 
@@ -34,7 +35,7 @@ Esta verificación automatizada no equivale a validar todavía todo el flujo de 
 | Marker_Pro v2.1 | Catálogo, importación de símbolos, cantidades detectadas o manuales, inserción y sustitución masiva | Importación a colección embebida del proyecto y comandos nativos de inserción; identificar lo generado mediante metadatos persistentes |
 | 4Mateo v4.5.1 | Limpieza, formato de folios, numeraciones, aislamiento, alineación y visibilidad | Propiedades de conductores, textos y folios con comandos de deshacer; traducir las reglas del XML a propiedades del modelo |
 
-El gestor actual ya dispone de agrupación, puentes, reservas, datos de cable y representación reactiva. `TerminalStripItem::connectStrip()` escucha `orderChanged`, `bridgeChanged`, `bridgeColorChanged` y `dataChanged`. Hay que verificar qué cambios de conectividad alcanzan estas señales antes de afirmar que todas las conexiones se actualizan automáticamente.
+El gestor actual ya dispone de agrupación, puentes, reservas, datos de cable y representación reactiva. `TerminalStripItem::connectStrip()` escucha `orderChanged`, `bridgeChanged`, `bridgeColorChanged` y `dataChanged`. La integración GNerador TB añade observación de conexiones, destinos, cables, referencias y folios, con notificaciones agrupadas y sin modificaciones automáticas de la pila de deshacer. La pertenencia a los borneros se cambia mediante las acciones nativas de asignación y reagrupación.
 
 `TerminalStripAutoImport` ya asigna bornas por prefijo de etiqueta y contempla reagruparlas. Evitar un segundo modelo paralelo de borneros.
 
@@ -63,8 +64,8 @@ QET incluye `sources/scripting/qetscriptapi.*`: edición del proyecto vivo, elem
 
 ## Compilación
 
-Seguir `INSTALL.md` y `CONTRIBUTING.md` de esta revisión, incluidos submódulos, Qt6 GuiPrivate, LinguistTools, SQLite3 y Qt Test. En Windows el compilador debe coincidir con el kit Qt. No hay todavía un ejecutable Faramax validado.
+Seguir `INSTALL.md` y `CONTRIBUTING.md` de esta revisión, incluidos submódulos, Qt6 GuiPrivate, LinguistTools, SQLite3 y Qt Test. En Windows el compilador debe coincidir con el kit Qt. El ejecutable de desarrollo está en `build-faramax/qelectrotech.exe`; el lanzador es `faramax/abrir-qet-faramax.ps1`.
 
 ## Siguiente hito
 
-El siguiente módulo es GNerador_TB, sobre el modelo y el editor nativos de borneros.
+El siguiente módulo pendiente es Marker_Pro. GNerador TB necesita además contraste sobre proyectos reales del usuario para validar las convenciones INT/EXT, códigos de modelo y presentación habituales.

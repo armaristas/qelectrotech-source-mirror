@@ -81,6 +81,8 @@ class TerminalStripItem : public QetGraphicsItem
 
 	private:
 		QPointer<TerminalStrip> m_strip;
+        bool m_faramax_style = false;
+        QRectF m_faramax_bounds;
 		QList<QMetaObject::Connection> m_strip_connections;
         TerminalStripDrawer::TerminalStripDrawer m_drawer;
         QUuid m_pending_strip_uuid;

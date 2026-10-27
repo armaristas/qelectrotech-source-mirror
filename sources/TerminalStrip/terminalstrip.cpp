@@ -1039,6 +1039,11 @@ QDomElement TerminalStrip::toXml(QDomDocument &parent_document)
 	auto root_elmt = parent_document.createElement(this->xmlTagName());
 
 	root_elmt.appendChild(m_data.toXml(parent_document));
+    if (!property("faramaxTBSettings").toString().isEmpty()) {
+        auto settings = parent_document.createElement("faramax_tb");
+        settings.appendChild(parent_document.createTextNode(property("faramaxTBSettings").toString()));
+        root_elmt.appendChild(settings);
+    }
 
 		//Undrawed terminals
 	auto xml_layout = parent_document.createElement(QStringLiteral("layout"));
@@ -1066,7 +1071,10 @@ bool TerminalStrip::fromXml(QDomElement &xml_element)
 		return false;
 	}
 
-		//Read terminal strip data
+		// GNerador TB presentation is stored with the native strip.
+    setProperty("faramaxTBSettings", xml_element.firstChildElement("faramax_tb").text());
+
+        //Read terminal strip data
 	auto xml_data = xml_element.firstChildElement(m_data.xmlTagName());
 	if (!xml_data.isNull()) {
 		m_data.fromXml(xml_data);

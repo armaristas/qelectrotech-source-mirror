@@ -17,6 +17,7 @@
 */
 
 #include "qetproject.h"
+#include "faramax/gneradortb.h"
 #include "container/qetcontainer.h"
 #include "container/qetcontainerdb.h"
 #include "container/qetzwriter.h"
@@ -1136,6 +1137,7 @@ void QETProject::folioLoaded(Diagram *folio)
 {
 	linkElementsToElementAutoNums(folio);
 	folio->refreshContents();
+    if (!m_terminal_strip_vector.isEmpty()) Faramax::TB::watch(this);
 }
 
 /**
@@ -4796,6 +4798,7 @@ TerminalStrip *QETProject::newTerminalStrip(QString installation, QString locati
  */
 void QETProject::watchTerminalStrip(TerminalStrip *strip, bool watch)
 {
+    if (watch) Faramax::TB::watch(this);
 	if (!strip) {
 		return;
 	}

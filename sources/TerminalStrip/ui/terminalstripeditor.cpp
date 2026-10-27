@@ -208,6 +208,7 @@ void TerminalStripEditor::setCurrentStrip(TerminalStrip *strip_)
 	if (m_current_strip) {
 		disconnect(m_current_strip, &TerminalStrip::orderChanged, this, &TerminalStripEditor::reload);
 		disconnect(m_current_strip, &TerminalStrip::bridgeChanged, this, &TerminalStripEditor::reload);
+        disconnect(m_current_strip, &TerminalStrip::dataChanged, this, &TerminalStripEditor::reloadOnCableChange);
         disconnect(m_current_strip, &QObject::destroyed, this, &TerminalStripEditor::clear);
 	}
 
@@ -270,6 +271,7 @@ void TerminalStripEditor::setCurrentStrip(TerminalStrip *strip_)
 
 		connect(m_current_strip, &TerminalStrip::orderChanged, this, &TerminalStripEditor::reload);
 		connect(m_current_strip, &TerminalStrip::bridgeChanged, this, &TerminalStripEditor::reload);
+        connect(m_current_strip, &TerminalStrip::dataChanged, this, &TerminalStripEditor::reloadOnCableChange);
         connect(m_current_strip, &QObject::destroyed, this, &TerminalStripEditor::clear);
 	}
 }

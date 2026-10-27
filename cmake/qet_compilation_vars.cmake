@@ -734,6 +734,11 @@ set(QET_SRC_FILES
   ${QET_DIR}/sources/faramax/terminalflowwidget.h
   ${QET_DIR}/sources/faramax/arrowtexts.cpp
   ${QET_DIR}/sources/faramax/arrowtexts.h
+  ${QET_DIR}/sources/faramax/gneradortb.h
+  ${QET_DIR}/sources/faramax/gneradortb.cpp
+  ${QET_DIR}/sources/faramax/gneradortbdraw.cpp
+  ${QET_DIR}/sources/faramax/gneradortbworkbook.cpp
+  ${QET_DIR}/sources/faramax/gneradortbeditor.cpp
   ${QET_DIR}/sources/TerminalStrip/terminalstripdata.cpp
   ${QET_DIR}/sources/TerminalStrip/terminalstripdata.h
   ${QET_DIR}/sources/TerminalStrip/ui/addterminalstripitemdialog.cpp

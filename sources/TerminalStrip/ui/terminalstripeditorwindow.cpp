@@ -29,6 +29,7 @@
 #include "terminalstripeditor.h"
 #include "terminalstripeditorwindow.h"
 #include "terminalstriptreedockwidget.h"
+#include "../../faramax/gneradortb.h"
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -143,6 +144,9 @@ TerminalStripEditorWindow::TerminalStripEditorWindow(QETProject *project, QWidge
     }
 	ui->m_remove_terminal->setDisabled(true);
 	addTreeDockWidget();
+    ui->m_tool_bar->addAction(tr("GNerador TB"), this, [this]() {
+        Faramax::TB::openEditor(m_project, m_tree_dock->currentStrip(), this);
+    });
 
 	m_free_terminal_editor = new FreeTerminalEditor(m_project, this);
 	m_terminal_strip_editor = new TerminalStripEditor{m_project, this};

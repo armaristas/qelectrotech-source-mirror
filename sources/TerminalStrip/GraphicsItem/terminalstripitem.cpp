@@ -16,6 +16,7 @@
 	along with QElectroTech.  If not, see <http://www.gnu.org/licenses/>.
 */
 #include "terminalstripitem.h"
+#include "../../faramax/gneradortb.h"
 #include "../../qetproject.h"
 
 #include "../diagram.h"
@@ -75,7 +76,8 @@ void TerminalStripItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
 	Q_UNUSED(option)
 	Q_UNUSED(widget)
 
-	m_drawer.paint(painter);
+    if (m_faramax_style) Faramax::TB::paint(painter, m_strip);
+    else m_drawer.paint(painter);
 
 	if (isSelected() || isHovered())
 	{
@@ -85,7 +87,8 @@ void TerminalStripItem::paint(QPainter *painter, const QStyleOptionGraphicsItem 
 
 QRectF TerminalStripItem::boundingRect() const
 {
-	auto br_ = m_drawer.boundingRect();
+    if (m_faramax_style) return m_faramax_bounds;
+    auto br_ = m_drawer.boundingRect();
 	br_.adjust(-5,-5,5,5);
 
 	return br_;
@@ -113,7 +116,14 @@ QList<TerminalStripItem::PdfRef> TerminalStripItem::pdfRefs() const
 		return refs;
 	}
 
-	const auto xref_rects = m_drawer.xrefRects();
+    if (m_faramax_style) {
+        for (const auto &ref : Faramax::TB::references(m_strip)) {
+            auto *element = ref.terminal->element();
+            if (element && element->diagram()) refs.append({element->diagram(), mapRectToScene(ref.rect), element->mapRectToScene(element->boundingRect())});
+        }
+        return refs;
+    }
+    const auto xref_rects = m_drawer.xrefRects();
 	for (const auto &xref_rect : xref_rects)
 	{
 		const auto physical_terminal = m_strip->physicalTerminal(xref_rect.physical);
@@ -141,7 +151,12 @@ QList<TerminalStripItem::PdfRef> TerminalStripItem::pdfRefs() const
 void TerminalStripItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event)
 {
 	QetGraphicsItem::hoverMoveEvent(event);
-	m_drawer.setMouseHoverPos(hoverMousePos());
+    if (m_faramax_style) {
+        setToolTip(QString());
+        for (const auto &ref : Faramax::TB::references(m_strip)) if (ref.rect.contains(hoverMousePos())) setToolTip(ref.terminal->label() + " : " + ref.terminal->Xref());
+        return;
+    }
+    m_drawer.setMouseHoverPos(hoverMousePos());
 	if (m_drawer.needUpdate()) {
 		update();
 	}
@@ -186,9 +201,16 @@ QString TerminalStripItem::xrefToolTip(const TerminalStripDrawer::hoverTerminal 
 
 void TerminalStripItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent *event)
 {
-	Q_UNUSED (event);
+	if (!m_strip) return;
 
-	const auto hovered = m_drawer.hoveredXref();
+    if (m_faramax_style) {
+        for (const auto &ref : Faramax::TB::references(m_strip)) if (ref.rect.contains(event->pos()) && ref.terminal->element()) {
+            setSelected(false); ungrabMouse(); QetGraphicsItem::showItem(ref.terminal->element()); return;
+        }
+        Faramax::TB::openEditor(m_strip->project(), m_strip, nullptr);
+        return;
+    }
+    const auto hovered = m_drawer.hoveredXref();
 
 	if (m_strip) {
 		if (hovered.physical >= 0 &&
@@ -279,7 +301,9 @@ void TerminalStripItem::connectStrip(TerminalStrip *strip)
 							<< connect(strip, &TerminalStrip::bridgeChanged, this, &TerminalStripItem::stripChanged)
 							<< connect(strip, &TerminalStrip::bridgeColorChanged, this, &TerminalStripItem::stripChanged)
 							<< connect(strip, &TerminalStrip::dataChanged, this, &TerminalStripItem::stripChanged);
+        m_strip_connections << connect(strip, &QObject::destroyed, this, &TerminalStripItem::stripChanged);
 	}
+    stripChanged();
 }
 
 /**
@@ -290,6 +314,9 @@ void TerminalStripItem::connectStrip(TerminalStrip *strip)
 void TerminalStripItem::stripChanged()
 {
 	prepareGeometryChange();
+    Faramax::TB::invalidateDrawing(m_strip);
+    m_faramax_style = Faramax::TB::enabled(m_strip);
+    m_faramax_bounds = m_faramax_style ? Faramax::TB::bounds(m_strip) : QRectF();
 	update();
 }
 

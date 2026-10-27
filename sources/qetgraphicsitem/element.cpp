@@ -17,6 +17,7 @@
 */
 #include "element.h"
 #include "../faramax/arrowtexts.h"
+#include "../faramax/gneradortb.h"
 #include "../qetapp.h"
 #include "../qetproject.h"
 #include "../dataBase/projectdatabase.h"
@@ -2610,6 +2611,13 @@ void Element::hoverLeaveEvent(QGraphicsSceneHoverEvent *e)
 */
 QVariant Element::itemChange(GraphicsItemChange change, const QVariant &value)
 {
+    // A removed element can remain alive on the undo stack. Notify before
+    // losing its scene, and again after joining a scene, so native terminal
+    // plans follow removal and reinsertion as well as changes of text.
+    if (change == QGraphicsItem::ItemSceneChange || change == QGraphicsItem::ItemSceneHasChanged) {
+        if (auto *folio = diagram(); folio && folio->project() && !folio->project()->terminalStrip().isEmpty())
+            Faramax::TB::watch(folio->project());
+    }
 	if (change == QGraphicsItem::ItemSelectedHasChanged)
 	{
 		const QList<DynamicElementTextItem *> texts = dynamicTextItems();

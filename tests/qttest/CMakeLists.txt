@@ -344,6 +344,7 @@ target_link_libraries(tst_terminalflow PRIVATE Qt::Test)
 add_test(NAME tst_terminalflow COMMAND tst_terminalflow)
 qet_add_app_test(tst_terminalflowproject tst_terminalflowproject.cpp)
 qet_add_app_test(tst_arrowtexts tst_arrowtexts.cpp)
+qet_add_app_test(tst_gneradortb tst_gneradortb.cpp)
 
 # Space on a picture turns its own transform, which the file saves (#1413),
 # alone and with a group.
