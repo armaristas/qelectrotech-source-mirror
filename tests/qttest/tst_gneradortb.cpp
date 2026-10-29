@@ -14,6 +14,7 @@
 #include "qetgraphicsitem/terminal.h"
 #include "qetproject.h"
 #include <QComboBox>
+#include <QContextMenuEvent>
 #include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
@@ -805,6 +806,90 @@ class tst_gneradortb : public QObject
         if (!configPreview.isEmpty())
             QVERIFY(config->grab().save(configPreview));
 
+        dialog->close();
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void originalCombMouseGestures()
+    {
+        QETProject project(fixture());
+        project.loadFolios();
+        auto *strip = spares(project, 12);
+        openEditor(&project, strip, nullptr);
+        QDialog *dialog = nullptr;
+        for (auto *widget : QApplication::topLevelWidgets())
+            if (widget->objectName() == "faramaxGNeradorTB")
+                dialog = qobject_cast<QDialog *>(widget);
+        QVERIFY(dialog);
+        auto *table = dialog->findChild<QTableWidget *>("gneradorTBTable");
+        QVERIFY(table);
+        table->scrollToItem(table->item(0, 11));
+        auto click = [&](int row, Qt::MouseButton button)
+        {
+            table->scrollToItem(table->item(row, 11));
+            const auto point = table->visualItemRect(table->item(row, 11)).center();
+            QTest::mouseClick(table->viewport(), button, Qt::NoModifier, point);
+        };
+        click(0, Qt::LeftButton);
+        QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 1);
+        const auto doublePoint = table->visualItemRect(table->item(0, 11)).center();
+        QTest::mouseDClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, doublePoint);
+        QTest::mouseRelease(table->viewport(), Qt::LeftButton, Qt::NoModifier, doublePoint);
+        QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 2);
+        QVERIFY(rows(strip)[0].values["peine"].toBool());
+        for (int count = 3; count <= 10; ++count)
+        {
+            click(0, Qt::LeftButton);
+            QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), count);
+        }
+        const int capped = project.undoStack()->index();
+        click(0, Qt::LeftButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(project.undoStack()->index(), capped);
+        click(1, Qt::LeftButton);
+        QTRY_VERIFY(rows(strip)[1].values["peine"].toBool());
+        QVERIFY(rows(strip)[0].terminal->bridge() == rows(strip)[1].terminal->bridge());
+        click(1, Qt::LeftButton);
+        QTRY_VERIFY(!rows(strip)[1].values["peine"].toBool());
+        QVERIFY(!rows(strip)[1].terminal->isBridged());
+        const int beforeRight = project.undoStack()->index();
+        click(1, Qt::RightButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(project.undoStack()->index(), beforeRight);
+        click(0, Qt::RightButton);
+        QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 9);
+        QCOMPARE(project.undoStack()->index(), beforeRight + 1);
+        bool openedMenu = false;
+        QTimer::singleShot(0, dialog,
+                           [&]()
+                           {
+                               if (auto *menu = dialog->findChild<QMenu *>("TBEssentialMenu"))
+                               {
+                                   openedMenu = true;
+                                   menu->close();
+                               }
+                           });
+        const auto point = table->visualItemRect(table->item(0, 11)).center();
+        QContextMenuEvent context(QContextMenuEvent::Mouse, point, table->viewport()->mapToGlobal(point));
+        QApplication::sendEvent(table->viewport(), &context);
+        QCoreApplication::processEvents();
+        QVERIFY(!openedMenu);
+        QCOMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 9);
+        project.undoStack()->undo();
+        QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 10);
+        project.undoStack()->redo();
+        QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), 9);
+        QCoreApplication::processEvents();
+        QCoreApplication::processEvents();
+        for (int count = 8; count >= 0; --count)
+        {
+            click(0, Qt::RightButton);
+            QTRY_COMPARE(rows(strip)[0].values["peine_grupo"].toInt(), count);
+        }
+        QVERIFY(!rows(strip)[0].values["peine"].toBool());
+        const int empty = project.undoStack()->index();
+        click(0, Qt::RightButton);
+        QCoreApplication::processEvents();
+        QCOMPARE(project.undoStack()->index(), empty);
         dialog->close();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
     }

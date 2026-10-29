@@ -925,6 +925,11 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             return;
         count = qBound(0, count, qMin(10, int(data.size()) - row));
         const int old = qMax(0, data[row].values.value("peine_grupo").toInt());
+        if (count == old)
+        {
+            queueApply(); // A mouse press may have paused another pending edit.
+            return;
+        }
         for (int i = row; i < qMin(int(data.size()), row + qMax(1, qMax(old, count))); ++i)
         {
             if (i == row && count > 0)
@@ -976,6 +981,30 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             }
             if (watched == table->viewport() && project && !project->isReadOnly())
             {
+                if (event->type() == QEvent::MouseButtonRelease)
+                {
+                    auto *mouse = static_cast<QMouseEvent *>(event);
+                    const auto index = table->indexAt(mouse->position().toPoint());
+                    if (mouse->button() == Qt::LeftButton && !painting && index.isValid() &&
+                        index.column() == fieldColumn("peine") &&
+                        data[index.row()].values.value("peine_grupo").toInt() > 0)
+                    {
+                        // The second release of a double click has no new
+                        // MouseButtonPress. It must grow the head, not toggle it.
+                        setCombSpan(index.row(), data[index.row()].values.value("peine_grupo").toInt() + 1);
+                        return true;
+                    }
+                    if (mouse->button() == Qt::RightButton && index.isValid() &&
+                        index.column() == fieldColumn("peine"))
+                    {
+                        // Handle the mouse gesture once, independently of the
+                        // platform's subsequent ContextMenu event.
+                        const int count = data[index.row()].values.value("peine_grupo").toInt();
+                        if (count > 0)
+                            setCombSpan(index.row(), count - 1);
+                        return true;
+                    }
+                }
                 if (event->type() == QEvent::MouseButtonPress)
                 {
                     auto *mouse = static_cast<QMouseEvent *>(event);
@@ -990,6 +1019,11 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                     if (mouse->button() == Qt::LeftButton && index.isValid() &&
                         (index.column() == fieldColumn("puente") || index.column() == fieldColumn("peine")))
                     {
+                        if (paintSticky && paintColumn != index.column())
+                        {
+                            paintSticky = false;
+                            table->viewport()->unsetCursor();
+                        }
                         liveTimer.stop();
                         painting = true;
                         paintFirst = paintLast = index.row();
@@ -1083,6 +1117,11 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
     {
         const auto index = table->indexAt(point);
         if (!index.isValid())
+            return;
+        // GNerador_TB reserves the comb column for left/right gestures.
+        // The release event above already reduced its head, so a native
+        // ContextMenu event must neither reduce it twice nor open a menu.
+        if (index.column() == fieldColumn("peine"))
             return;
         if (!table->item(index.row(), index.column())->isSelected())
         {
@@ -1357,9 +1396,11 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                         paint(orange);
                     const int count = v.value("peine_grupo").toInt();
                     item->setText(count > 0 ? QString::number(count) : QString());
-                    item->setToolTip(QStringLiteral("Peine: clic izquierdo en la cabecera amplía el "
-                                                    "tramo. Botón derecho → Tamaño peine permite ampliarlo o "
-                                                    "reducirlo. Arrastra para pintar contactos."));
+                    item->setToolTip(
+                        QStringLiteral("Peine: primer clic izquierdo crea el tramo; en su cabecera, "
+                                       "clic izquierdo amplía y clic derecho reduce (hasta 10 posiciones). "
+                                       "En las posiciones del tramo, clic izquierdo marca o desmarca "
+                                       "el contacto. Arrastra para pintar contactos."));
                 }
                 if (field == "color")
                 {
