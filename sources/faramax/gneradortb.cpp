@@ -119,6 +119,7 @@ QVector<Terminal *> endpoints(Terminal *peer)
 QJsonObject defaults()
 {
     return {{"enabled", false},
+            {"drawing_style", "mixed"},
             {"x_start", 50},
             {"y_base", 0},
             {"paso_x", 20},
@@ -211,7 +212,8 @@ QJsonObject settings(TerminalStrip *strip)
 }
 bool enabled(TerminalStrip *strip)
 {
-    return strip && settings(strip).value("enabled").toBool();
+    const auto cfg = settings(strip);
+    return strip && cfg.value("enabled").toBool() && cfg.value("drawing_style").toString("mixed") == "mixed";
 }
 
 QString classify(const QString &device, bool simple, bool ground, const QJsonObject &config)
@@ -1108,6 +1110,13 @@ class LiveProject final : public QObject
     {
         if (!project)
             return;
+        // A loading progress dialog can deliver timer events before the
+        // project's undo stack and all its folios have been initialized.
+        if (project->state() == QETProject::ProjectParsingRunning)
+        {
+            timer.start(50);
+            return;
+        }
         for (const auto &c : connections)
             disconnect(c);
         connections.clear();

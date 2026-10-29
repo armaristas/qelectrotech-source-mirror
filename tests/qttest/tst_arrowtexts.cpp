@@ -115,6 +115,24 @@ private slots:
         QTRY_COMPARE(field(reopenedReport)->toPlainText(), QString("X9:42"));
     }
 
+    void automaticFieldLoadsWithGuiProgressEvents()
+    {
+        QTemporaryDir directory;QString path=directory.filePath("automatic-report.qet");QUuid reportId;
+        {
+            QETProject source(fixture());const auto c=circuit(source);QVERIFY(c.report);reportId=c.report->uuid();
+            std::unique_ptr<QUndoCommand> macro(command(&source,{{c.report,{},false}},false));QVERIFY(macro);source.undoStack()->push(macro.release());
+            QFile file(path);QVERIFY(file.open(QIODevice::WriteOnly));file.write(source.toXml().toByteArray());file.close();
+        }
+        auto *editor=QetAppTest::editor();QVERIFY(editor);
+        QVERIFY(editor->openAndAddProject(path, false));
+        auto *loaded=editor->currentProject();QVERIFY(loaded);QCOMPARE(loaded->state(),QETProject::Ok);
+        loaded->loadFolios();Element *report=nullptr;
+        for(auto *diagram:loaded->diagrams())for(auto *element:diagram->elements())if(element->uuid()==reportId)report=element;
+        QVERIFY(report);QVERIFY(field(report));
+        QTRY_COMPARE(field(report)->toPlainText(),QString("X9:42"));
+        loaded->setReadOnly(true);QVERIFY(editor->closeProject(loaded));
+    }
+
     void noLinkAndReadOnly()
     {
         QETProject project(fixture()); const auto c = circuit(project); QVERIFY(c.report);

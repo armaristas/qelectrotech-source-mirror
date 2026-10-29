@@ -1,10 +1,14 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
+#include "../TerminalStrip/GraphicsItem/terminalstripdrawer.h"
 #include "../TerminalStrip/GraphicsItem/terminalstripdrawerhelpers.h"
+#include "../TerminalStrip/GraphicsItem/trueterminalstrip.h"
 #include "../TerminalStrip/physicalterminal.h"
 #include "../TerminalStrip/realterminal.h"
 #include "../TerminalStrip/terminalcolor.h"
 #include "../TerminalStrip/terminalstrip.h"
 #include "../TerminalStrip/terminalstripbridge.h"
+#include "../project/projectpropertieshandler.h"
+#include "../qetproject.h"
 #include "gneradortb.h"
 #include <QFontMetricsF>
 #include <QJsonDocument>
@@ -248,7 +252,8 @@ QPicture picture(TerminalStrip *strip, const QVector<Row> &all, const QJsonObjec
                 const qreal center = doubled ? x + step : cx;
                 p.drawEllipse(QPointF(center, baseline - 30), 2, 2);
                 p.drawEllipse(QPointF(center, baseline - 10), 2, 2);
-                if (ElementData::terminalTypeFromString(v.value("tipo_borna").toString()) == ElementData::TTGeneric)
+                if (ElementData::terminalTypeFromString(v.value("tipo_borna").toString()) ==
+                    ElementData::TTGeneric)
                     p.drawLine(QPointF(center, baseline - 28), QPointF(center, baseline - 12));
                 const qreal levelOffset = multi && !doubled ? row.terminal->level() * 10 : 0;
                 TerminalStripDrawer::Helpers::drawTypeSymbol(
@@ -479,6 +484,18 @@ QPair<QColor, QColor> terminalColors(const Row &row, const QJsonObject &config)
 }
 QRectF render(QPainter *painter, TerminalStrip *strip, const QVector<Row> &data, const QJsonObject &config)
 {
+    if (strip && strip->project() && config.value("drawing_style").toString("mixed") != "mixed")
+    {
+        using namespace TerminalStripDrawer;
+        TerminalStripDrawer::TerminalStripDrawer drawer(
+            QSharedPointer<TrueTerminalStrip>::create(strip),
+            strip->project()->projectPropertiesHandler().terminalStripLayoutHandler().defaultLayout());
+        drawer.setDrawStyle(TerminalStripLayoutPattern::drawStyleFromString(
+            config.value("drawing_style").toString(), TerminalStripLayoutPattern::DrawStyle::Schematic));
+        if (painter)
+            drawer.paint(painter);
+        return drawer.boundingRect().adjusted(-10, -10, 10, 10);
+    }
     const auto drawing = picture(strip, data, config);
     if (painter)
         painter->drawPicture(0, 0, drawing);

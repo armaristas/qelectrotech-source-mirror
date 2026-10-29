@@ -128,6 +128,16 @@ public:
 private:
     void refresh()
     {
+        // The loading progress dialog processes events inside QETProject's
+        // constructor, before init() has created its undo stack. Do not read
+        // the circuit or connect to that stack until the project is ready.
+        if (usesTarget(m_text))
+            if (auto *diagram = m_text->parentElement()->diagram())
+                if (auto *project = diagram->project(); project && project->state() == QETProject::ProjectParsingRunning)
+                {
+                    m_timer.start(50);
+                    return;
+                }
         for (const auto &connection : m_connections) disconnect(connection);
         m_connections.clear();
         if (!usesTarget(m_text)) return;

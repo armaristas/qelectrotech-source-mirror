@@ -13,10 +13,13 @@
 #include "qetgraphicsitem/element.h"
 #include "qetgraphicsitem/terminal.h"
 #include "qetproject.h"
+#include <QComboBox>
 #include <QDialog>
 #include <QDir>
 #include <QDoubleSpinBox>
 #include <QFile>
+#include <QGroupBox>
+#include <QInputDialog>
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
@@ -710,20 +713,34 @@ class tst_gneradortb : public QObject
         QVERIFY(config);
         QVERIFY(!config->isVisible());
         QVERIFY(table->parentWidget() != config);
+        QCOMPARE(config->findChildren<QGroupBox *>().size(), 10);
+        for (const auto &k : defaults().keys())
+            if (k != "dark_mode")
+                QVERIFY2(config->findChild<QWidget *>("TBConfig_" + k), qPrintable(k));
+        QVERIFY(table->item(0, 16)->toolTip().contains("Multinivel"));
+        QVERIFY(table->item(0, 18)->toolTip().contains("1/6"));
+        QVERIFY(table->item(0, 20)->toolTip().contains("W1"));
+
         bool menuChecked = false;
-        QTimer::singleShot(
-            0, dialog,
-            [&]()
-            {
-                auto *menu = dialog->findChild<QMenu *>("TBEssentialMenu");
-                if (menu)
-                {
-                    menuChecked = menu->objectName() == "TBEssentialMenu" && menu->actions().size() == 6;
-                    for (auto *a : menu->actions())
-                        menuChecked = menuChecked && !a->text().isEmpty() && !a->text().contains("historial");
-                    menu->close();
-                }
-            });
+        QTimer::singleShot(0, dialog,
+                           [&]()
+                           {
+                               auto *menu = dialog->findChild<QMenu *>("TBEssentialMenu");
+                               if (menu)
+                               {
+                                   menuChecked = menu->objectName() == "TBEssentialMenu";
+                                   QStringList labels;
+                                   for (auto *a : menu->actions())
+                                       if (!a->isSeparator())
+                                           labels << a->text();
+                                   menuChecked &=
+                                       labels == QStringList({"Copiar", "Pegar", "Cortar",
+                                                              "Rellenar hacia abajo", "Fila (Borna)", "Subir",
+                                                              "Bajar", QStringLiteral("Tamaño peine…"),
+                                                              QStringLiteral("Multinivel…")});
+                                   menu->close();
+                               }
+                           });
         const auto menuPoint = table->visualItemRect(table->item(0, 3)).center();
         QMetaObject::invokeMethod(table, "customContextMenuRequested", Qt::DirectConnection,
                                   Q_ARG(QPoint, menuPoint));
@@ -743,8 +760,8 @@ class tst_gneradortb : public QObject
         QTRY_VERIFY(!rows(s)[0].terminal->isBridged());
         QCoreApplication::processEvents();
         QCoreApplication::processEvents();
-        QTRY_COMPARE(table->item(0,8)->checkState(),Qt::Unchecked);
-        table->scrollToItem(table->item(0,11));
+        QTRY_COMPARE(table->item(0, 8)->checkState(), Qt::Unchecked);
+        table->scrollToItem(table->item(0, 11));
         const auto combAnchor = table->visualItemRect(table->item(0, 11)).center();
         QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, combAnchor);
         QTRY_COMPARE(rows(s)[0].values["peine_grupo"].toInt(), 1);
@@ -753,8 +770,23 @@ class tst_gneradortb : public QObject
         const auto combContact = table->visualItemRect(table->item(1, 11)).center();
         QTest::mouseClick(table->viewport(), Qt::LeftButton, Qt::NoModifier, combContact);
         QTRY_VERIFY(rows(s)[1].terminal->isBridged());
-        QMetaObject::invokeMethod(table, "customContextMenuRequested", Qt::DirectConnection,
-                                  Q_ARG(QPoint, combAnchor));
+        table->setCurrentCell(0, 11);
+        QTimer::singleShot(0, dialog,
+                           [&]()
+                           {
+                               for (auto *w : QApplication::topLevelWidgets())
+                                   if (auto *input = qobject_cast<QInputDialog *>(w))
+                                   {
+                                       input->setIntValue(1);
+                                       input->accept();
+                                   }
+                           });
+        QPushButton *sizeButton = nullptr;
+        for (auto *button : config->findChildren<QPushButton *>())
+            if (button->text() == QStringLiteral("Tamaño del peine…"))
+                sizeButton = button;
+        QVERIFY(sizeButton);
+        sizeButton->click();
         QTRY_COMPARE(rows(s)[0].values["peine_grupo"].toInt(), 1);
         QVERIFY(!rows(s)[1].terminal->isBridged());
         config->show();
@@ -763,8 +795,95 @@ class tst_gneradortb : public QObject
         field->setValue(23);
         QTRY_COMPARE(settings(s).value("paso_x").toInt(), 23);
         QVERIFY(field == config->findChild<QDoubleSpinBox *>("TBConfig_paso_x"));
+        auto *mode = config->findChild<QComboBox *>("TBConfig_drawing_style");
+        QVERIFY(mode);
+        QCOMPARE(mode->count(), 4);
+        mode->setCurrentIndex(mode->findData("realistic_screw"));
+        QTRY_COMPARE(settings(s).value("drawing_style").toString(), QString("realistic_screw"));
+        QVERIFY(settings(s).value("enabled").toBool());
+        const auto configPreview = qEnvironmentVariable("QET_TB_CONFIG_PREVIEW");
+        if (!configPreview.isEmpty())
+            QVERIFY(config->grab().save(configPreview));
+
         dialog->close();
         QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    }
+    void fourDrawingStylesPersistAndRender()
+    {
+        QETProject p(fixture());
+        p.loadFolios();
+        auto *strip = spares(p, 5);
+        auto *diagram = p.diagrams().first();
+        auto *item = new TerminalStripItem(strip);
+        diagram->addItem(item);
+        auto cfg = settings(strip);
+        cfg["enabled"] = true;
+        using Style = TerminalStripLayoutPattern::DrawStyle;
+        const QVector<QPair<QString, Style>> modes{{"schematic", Style::Schematic},
+                                                   {"realistic_screw", Style::RealisticScrew},
+                                                   {"realistic_push_in", Style::RealisticPushIn},
+                                                   {"mixed", Style::Schematic}};
+        for (const auto &mode : modes)
+        {
+            cfg["drawing_style"] = mode.first;
+            push(p, strip, rows(strip), cfg);
+            QCoreApplication::processEvents();
+            QCoreApplication::processEvents();
+            QCOMPARE(enabled(strip), mode.first == "mixed");
+            if (mode.first != "mixed")
+                QCOMPARE(item->drawStyle(), mode.second);
+            auto rect = render(nullptr, strip, rows(strip), cfg);
+            QVERIFY(rect.isValid());
+            QImage image(rect.size().toSize() + QSize(20, 20), QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            painter.translate(10 - rect.left(), 10 - rect.top());
+            render(&painter, strip, rows(strip), cfg);
+            painter.end();
+            const auto folder = qEnvironmentVariable("QET_TB_STYLES_PREVIEW");
+            if (!folder.isEmpty())
+                QVERIFY(image.save(folder + "/" + mode.first + ".png"));
+            QTemporaryDir dir;
+            QFile file(dir.filePath("styles.qet"));
+            QVERIFY(file.open(QIODevice::WriteOnly));
+            file.write(p.toXml().toByteArray());
+            file.close();
+            QETProject restored(file.fileName());
+            QCOMPARE(restored.state(), QETProject::Ok);
+            restored.loadFolios();
+            TerminalStrip *copy = nullptr;
+            for (auto *s : restored.terminalStrip())
+                if (s->uuid() == strip->uuid())
+                    copy = s;
+            QVERIFY(copy);
+            QCOMPARE(settings(copy)["drawing_style"].toString(), mode.first);
+        }
+    }
+    void openCompressedProjectInEditor()
+    {
+        const auto path = qEnvironmentVariable("QET_LOADING_REPRO");
+        if (path.isEmpty())
+            QSKIP("Set QET_LOADING_REPRO to a local copy of the project to reproduce a reported loading "
+                  "failure.");
+        auto *editor = QetAppTest::editor();
+        QVERIFY(editor);
+        QVERIFY(editor->openAndAddProject(path, false));
+        auto *project = editor->currentProject();
+        QVERIFY(project);
+        QCOMPARE(project->state(), QETProject::Ok);
+        project->loadFolios();
+        QTest::qWait(150);
+        for (auto *diagram : project->diagrams())
+        {
+            QImage image(1100, 800, QImage::Format_ARGB32);
+            image.fill(Qt::white);
+            QPainter painter(&image);
+            diagram->render(&painter);
+            painter.end();
+        }
+        QCoreApplication::processEvents();
+        project->setReadOnly(true); // Discard only this temporary reproduction copy during cleanup.
+        QVERIFY(editor->closeProject(project));
     }
     void representativeDrawing()
     {

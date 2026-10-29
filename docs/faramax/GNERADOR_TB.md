@@ -13,7 +13,7 @@ La ventana es no modal: puede permanecer abierta mientras se modifica el esquema
 
 ## Interfaz de referencia
 
-El editor se abre maximizado y puede restaurarse o redimensionarse. Mantiene el panel lateral del generador original: acciones principales, lista de borneros, excepciones EXT/INT, búsqueda y mensajes. La tabla usa el orden de columnas del original, con 21 columnas visibles por defecto. El tamaño del peine se muestra junto a su casilla y se ajusta con clic izquierdo/derecho o en **Configuración → Edición y datos → Tamaño del peine**; su columna independiente puede mostrarse desde **Columnas**.
+El editor se abre maximizado y puede restaurarse o redimensionarse. Mantiene el panel lateral del generador original: acciones principales, lista de borneros, excepciones EXT/INT, búsqueda y mensajes. La tabla usa el orden de columnas del original, con 21 columnas visibles por defecto. El tamaño del peine se muestra junto a su casilla y se amplía con clic izquierdo y se ajusta desde el menú derecho o en **Configuración → Edición y datos → Tamaño del peine**; su columna independiente puede mostrarse desde **Columnas**.
 
 Los colores identifican bornero/número, puentes y reservas (verde), peines (naranja), cortes y destinos múltiples (azul), duplicados (morado) y datos que revisar (rojo). La columna Color comparte las reglas y el bicolor del plano. Las casillas se accionan haciendo clic en su celda. Las herramientas de copiar, pegar, ordenar, mover y gestionar reservas se distribuyen entre el menú contextual esencial y **Configuración → Edición y datos**.
 
@@ -58,7 +58,9 @@ La validación automatizada está en `tst_gneradortb`; el archivo `fixtures/gner
 
 ## Verificación realizada
 
-Windows, Qt 6.11.1 y MinGW 13.1. `tst_gneradortb` completa 21 comprobaciones sin fallos: conexiones, actualización, persistencia, puentes, peines separados, pintura, configuración en vivo, menú esencial, reservas, multinivel y dibujo. Las otras cinco baterías (`tst_terminalflow`, `tst_terminalflowproject`, `tst_arrowtexts`, `tst_terminalcableauto` y `tst_terminallabeldisplay`) pasan sin fallos en 24,77 segundos. Se han revisado las capturas sintéticas del editor y el plano. La validación anterior de XLSX verificó las 22 columnas compatibles más identidad/procedencia, la hoja oculta y el tratamiento como texto de cadenas que empiezan por `=`.
+Revisión de 29/10/2026, Windows, Qt 6.11.1 y MinGW 13.1: `tst_gneradortb` completa 23 comprobaciones y `tst_arrowtexts` completa 8, sin fallos ni omisiones. Incluyen apertura desde el editor con diálogo de progreso, menús, ayudas, campos organizados, actualización en vivo, guardado/reapertura de los cuatro estilos y pintura de puentes/peines. Se abre y dibuja además una copia local del proyecto comprimido comunicado por el usuario; su contenido y el archivo original permanecen idénticos. Las capturas de configuración y de los cuatro estilos se han revisado visualmente.
+
+La revisión anterior también verificó las otras baterías de numeración, cables y etiquetas, y la estructura XLSX de 22 columnas compatibles más identidad/procedencia, la hoja oculta y el tratamiento como texto de cadenas que empiezan por `=`.
 
 La prueba de destinos largos detectó que el contorno automático de `QPicture` omitía textos girados en este entorno. El dibujante calcula sus límites con las métricas de fuente y avisa al elemento gráfico antes de cambiar su geometría, para evitar recortes en pantalla y PDF. Falta contrastar las convenciones y la presentación sobre los proyectos reales del usuario.
 
@@ -67,9 +69,9 @@ La revisión de interfaz incorpora pruebas de edición sobre el nuevo orden de c
 ## Revisión de interacción y dibujo
 
 - La tabla ocupa la zona principal. **Configuración** agrupa Presentación y reglas, Comprobaciones, Vista previa y Edición y datos. No hay pestañas sobre la tabla, menú Herramientas de tabla ni botones Aplicar/Actualizar.
-- Botón derecho: copiar, cortar, pegar, rellenar abajo, ajustar columnas y submenú Fila (insertar arriba/abajo, mover debajo de un destino, duplicar como reserva y quitar del bornero). Las opciones administrativas se encuentran en Configuración, conservando también rellenar derecha, ordenar, multinivel, columnas, reservas y JSON.
+- Botón derecho: copiar, pegar, cortar, rellenar hacia abajo, subir, bajar, tamaño de peine, multinivel y submenú Fila (Borna) (insertar arriba/abajo, mover debajo de un destino, duplicar como reserva y quitar del bornero). Las opciones administrativas se encuentran en Configuración, conservando también rellenar derecha, ordenar, multinivel, columnas, reservas y JSON.
 - Puentes: pulsar y arrastrar pinta o borra enlaces entre bornas consecutivas. Se colorean ambos extremos. El menú de la columna permite fijar Pintar/Borrar hasta pulsar Esc. Cada gesto crea una sola acción de deshacer.
-- Peines: el primer contacto crea un tramo de una posición. Clic izquierdo en su cabecera amplía el tramo; clic derecho lo reduce (0–10 posiciones, como v5.6). Los contactos dentro del tramo se pueden activar/desactivar o pintar. El fondo naranja identifica el alcance; la marca identifica cada contacto eléctrico. Un peine de una sola posición no crea una conexión ficticia.
+- Peines: el primer contacto crea un tramo de una posición. Clic izquierdo en su cabecera amplía el tramo; **Tamaño peine** en el menú derecho lo amplía o reduce (0–10 posiciones). Los contactos dentro del tramo se pueden activar/desactivar o pintar. El fondo naranja identifica el alcance; la marca identifica cada contacto eléctrico. Un peine de una sola posición no crea una conexión ficticia.
 - El dibujo usa banda de color superior de 45 unidades, colores dobles por mitades, destinos enmarcados, puentes rojos, peines naranjas, barras de manguera con vástago central, pantallas discontinuas y una salida R en el lado libre de las reservas. Los cortes conservan el bornero y sus identidades.
 - Normal agrupa mangueras consecutivas; Compacta agrupa por nombre y escalona las barras. La representación conserva las referencias navegables y los límites medidos de los textos para la exportación PDF.
 
@@ -78,3 +80,15 @@ La revisión de interfaz incorpora pruebas de edición sobre el nuevo orden de c
 Se han contrastado las acciones del menú original `_open_row_menu`, el tamaño y los contactos de peine (`set_peine_group_size`), los campos de tabla, las excepciones INT/EXT, la edición y el historial, y las rutinas de representación de bornas, mangueras y SHL. Cargar/generar un QET externo se sustituye por el proyecto abierto y el plan nativo; Excel sigue siendo opcional. Validar está en Configuración → Comprobaciones. Los textos manuales siguen siendo sustituciones explícitas; vaciarlos recupera el cálculo automático.
 
 El límite actual de cuatro niveles y la importación de anotaciones sin crear dispositivos siguen descritos arriba. La coincidencia gráfica se aproxima a v5.6 mediante primitivas nativas de QET; no importa dibujos XML estáticos.
+
+## Ajustes clasificados y tipos de bornero
+
+Presentación y reglas agrupa los campos en Representación; Geometría y disposición del Mixto; Textos y conexiones internos; Textos y conexiones externos; Mangueras; Bornas, niveles y reservas; Conexiones, tierra y pantallas SHL; Colores; Compatibilidad; y Exportación. Los campos conservan sus nombres de configuración y sus valores anteriores.
+
+**Tipo de bornero** ofrece Esquemático, Tornillo, Push-in y Mixto (GNerador_TB). Los tres primeros utilizan los dibujantes y la plantilla nativos de QET; los ajustes de geometría y textos de GNerador se aplican al Mixto. Elegir un tipo activa su presentación y actualiza los planos del bornero, la vista previa y lo guardado en el proyecto. Un proyecto sin presentación GNerador activada mantiene el estilo nativo guardado en cada plan.
+
+El menú derecho muestra las acciones solicitadas, agrupadas con separadores. Sobre un peine también abre el menú; su reducción se realiza mediante **Tamaño peine**, desde la cabecera o desde una posición dentro del tramo. Se mantienen los modos de pintura de puentes y contactos en sus columnas. Las ayudas de Nivel, Peine, SHL y Rango SHL explican la edición y ejemplos de rango (`1/6`), manguera (`W1`) y combinación (`1/6 & W2`).
+
+### Cierre durante la carga de proyectos
+
+La actualización diferida de flechas podía ejecutarse dentro del diálogo de progreso, antes de que el constructor del proyecto creara su historial de Deshacer. La conexión a ese objeto todavía sin inicializar causaba un acceso inválido. Los observadores de flechas y borneros aplazan ahora su ejecución mientras el proyecto se encuentra en `ProjectParsingRunning`. La regresión se comprueba abriendo un proyecto con texto automático de flecha en el editor completo; no basta con analizar su XML sin interfaz.

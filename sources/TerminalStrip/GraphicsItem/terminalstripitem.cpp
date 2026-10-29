@@ -269,6 +269,12 @@ void TerminalStripItem::setLayout(QSharedPointer<TerminalStripLayoutPattern> lay
  */
 void TerminalStripItem::setDrawStyle(TerminalStripLayoutPattern::DrawStyle style)
 {
+    // A configured native style belongs to the strip, including folios
+    // whose items are restored later by the lazy loader.
+    const auto config = Faramax::TB::settings(m_strip);
+    if (m_strip && config.value("enabled").toBool() && !Faramax::TB::enabled(m_strip))
+        style = TerminalStripLayoutPattern::drawStyleFromString(
+            config.value("drawing_style").toString(), style);
 	if (style == m_drawer.drawStyle()) {
 		return;
 	}
@@ -316,6 +322,10 @@ void TerminalStripItem::stripChanged()
 	prepareGeometryChange();
     Faramax::TB::invalidateDrawing(m_strip);
     m_faramax_style = Faramax::TB::enabled(m_strip);
+    const auto config = Faramax::TB::settings(m_strip);
+    if (m_strip && config.value("enabled").toBool() && !m_faramax_style)
+        m_drawer.setDrawStyle(TerminalStripLayoutPattern::drawStyleFromString(
+            config.value("drawing_style").toString(), TerminalStripLayoutPattern::DrawStyle::Schematic));
     m_faramax_bounds = m_faramax_style ? Faramax::TB::bounds(m_strip) : QRectF();
 	update();
 }

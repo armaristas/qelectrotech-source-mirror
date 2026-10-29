@@ -33,6 +33,7 @@
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QGridLayout>
+#include <QGroupBox>
 #include <QHBoxLayout>
 #include <QHeaderView>
 #include <QInputDialog>
@@ -107,7 +108,8 @@ int fieldColumn(const QString &field)
 constexpr int SwatchRole = Qt::UserRole + 10;
 constexpr int StripeRole = Qt::UserRole + 11;
 const QMap<QString, QString> captions{
-    {"enabled", "Usar dibujo GNerador TB"},
+    {"enabled", "Usar la presentación configurada"},
+    {"drawing_style", "Tipo de bornero"},
     {"x_start", "Origen X"},
     {"y_base", "Origen Y"},
     {"paso_x", "Paso entre bornas"},
@@ -129,7 +131,7 @@ const QMap<QString, QString> captions{
     {"hose_line_len_int", "Marca manguera interna"},
     {"open_after_export", "Abrir Excel después de exportar"},
     {"draw_ground_line", "Dibujar línea de tierra"},
-    {"draw_frame", "Enmarcar destinos"},
+    {"draw_frame", "Marco exterior del bornero"},
     {"font_family", "Fuente general"},
     {"font_family_ext", "Fuente externa"},
     {"font_family_int", "Fuente interna"},
@@ -335,6 +337,9 @@ QDialog#faramaxGNeradorTB { background:#071b24; color:#eaf7ff; font-family:'Sego
 QWidget { color:#eaf7ff; font-family:'Segoe UI'; font-size:12px; }
 QFrame#TBLeft, QFrame#TBWork { background:#0b2534; border:1px solid #25465a; border-radius:6px; }
 QLabel { background:transparent; }
+QScrollArea, QWidget#TBSettingsPage { background:#071b24; border:0; }
+QGroupBox { background:#0b2534; border:1px solid #25465a; border-radius:5px; margin-top:14px; padding:14px 10px 10px; }
+QGroupBox::title { subcontrol-origin:margin; left:12px; padding:0 5px; color:#5ad7f7; font-weight:600; }
 QLabel#TBTitle { font-size:15px; font-weight:700; }
 QLabel#TBSection { font-weight:700; }
 QLabel#TBTableSummary { color:#8db4c6; font-size:11px; }
@@ -556,17 +561,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         tools->addAction(QStringLiteral("Tamaño del peine…"), this,
                          [this]()
                          {
-                             const int row = table->currentRow();
-                             if (row < 0)
-                                 return;
-                             bool accepted = false;
-                             const int count = QInputDialog::getInt(
-                                 this, QStringLiteral("Peine"),
-                                 QStringLiteral("Número de bornas consecutivas del mismo nivel"),
-                                 qMax(1, data[row].values.value("peine_grupo").toInt()), 0,
-                                 qMin(10, int(data.size()) - row), 1, &accepted);
-                             if (accepted)
-                                 setCombSpan(row, count);
+                             combSize();
                          });
         tools->addAction(QStringLiteral("Ordenar"), this,
                          [this]()
@@ -750,6 +745,7 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         auto *scroll = new QScrollArea(this);
         scroll->setWidgetResizable(true);
         configPage = new QWidget(scroll);
+        configPage->setObjectName("TBSettingsPage");
         scroll->setWidget(configPage);
         tabs->addTab(scroll, QStringLiteral("Presentación y reglas"));
         diagnostics = new QPlainTextEdit(this);
@@ -905,6 +901,23 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             else
                 item->setText(text(value));
         }
+    }
+    void combSize()
+    {
+        const int row = table->currentRow();
+        if (row < 0 || !writable())
+            return;
+        int anchor = row;
+        while (anchor > 0 && data[anchor].values.value("peine_grupo").toInt() < 0)
+            --anchor;
+        bool accepted = false;
+        const int count = QInputDialog::getInt(
+            this, QStringLiteral("Tamaño del peine"),
+            QStringLiteral("Posiciones del tramo (0 elimina el peine). Marca después sus contactos."),
+            qMax(1, data[anchor].values.value("peine_grupo").toInt()), 0, qMin(10, int(data.size()) - anchor),
+            1, &accepted);
+        if (accepted)
+            setCombSpan(anchor, count);
     }
     void setCombSpan(int row, int count)
     {
@@ -1078,12 +1091,6 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
         }
         else
             table->setCurrentCell(index.row(), index.column(), QItemSelectionModel::NoUpdate);
-        if (index.column() == fieldColumn("peine") &&
-            data[index.row()].values.value("peine_grupo").toInt() > 0)
-        {
-            setCombSpan(index.row(), data[index.row()].values.value("peine_grupo").toInt() - 1);
-            return;
-        }
         QMenu menu(this);
         menu.setObjectName("TBEssentialMenu");
         if (index.column() == fieldColumn("puente") || index.column() == fieldColumn("peine"))
@@ -1110,22 +1117,23 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                        {
                            copy(false);
                        });
-        menu.addAction(QStringLiteral("Cortar"), this,
-                       [this]()
-                       {
-                           copy(true);
-                       });
         menu.addAction(QStringLiteral("Pegar"), this,
                        [this]()
                        {
                            paste();
                        });
-        menu.addAction(QStringLiteral("Rellenar abajo"), this,
+        menu.addAction(QStringLiteral("Cortar"), this,
+                       [this]()
+                       {
+                           copy(true);
+                       });
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Rellenar hacia abajo"), this,
                        [this]()
                        {
                            fill(false);
                        });
-        auto *rowsMenu = menu.addMenu(QStringLiteral("Fila"));
+        auto *rowsMenu = menu.addMenu(QStringLiteral("Fila (Borna)"));
         rowsMenu->addAction(QStringLiteral("Insertar arriba"), this,
                             [this, index]()
                             {
@@ -1153,10 +1161,27 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                             {
                                 remove();
                             });
-        menu.addAction(QStringLiteral("Ajustar columnas"), this,
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Subir"), this,
                        [this]()
                        {
-                           table->resizeColumnsToContents();
+                           move(-1);
+                       });
+        menu.addAction(QStringLiteral("Bajar"), this,
+                       [this]()
+                       {
+                           move(1);
+                       });
+        menu.addSeparator();
+        menu.addAction(QStringLiteral("Tamaño peine…"), this,
+                       [this]()
+                       {
+                           combSize();
+                       });
+        menu.addAction(QStringLiteral("Multinivel…"), this,
+                       [this]()
+                       {
+                           expand();
                        });
         menu.exec(table->viewport()->mapToGlobal(point));
     }
@@ -1298,6 +1323,17 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                 if (!item->data(Qt::UserRole + 12).isValid())
                     item->setData(Qt::UserRole + 12, item->toolTip());
                 item->setToolTip(item->data(Qt::UserRole + 12).toString());
+                if (field == "nivel")
+                    item->setToolTip(QStringLiteral(
+                        "Nivel nativo de la borna: 0 es el primero (hasta 3). Para crear o agrupar niveles, "
+                        "usa botón derecho → Multinivel. No cambia las conexiones eléctricas."));
+                if (field == "mang_shl_ext" || field == "mang_shl_int")
+                    item->setToolTip(QStringLiteral(
+                        "Activa SHL en este lado e indica un rango, por ejemplo 1/6, o el nombre de una "
+                        "manguera, por ejemplo W1. Separa varios rangos o mangueras con &: 1/6 & W2."));
+                if (field == "shl_ext" || field == "shl_int")
+                    item->setToolTip(QStringLiteral("Activa la pantalla en este lado. En Rango SHL indica "
+                                                    "las bornas o la manguera que abarca la pantalla."));
                 item->setData(SwatchRole, QVariant());
                 item->setData(StripeRole, QVariant());
                 auto paint = [item](const QColor &color, const QColor &ink = Qt::black)
@@ -1321,8 +1357,9 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
                         paint(orange);
                     const int count = v.value("peine_grupo").toInt();
                     item->setText(count > 0 ? QString::number(count) : QString());
-                    item->setToolTip(QStringLiteral("Peine: clic izquierdo amplía y clic derecho reduce el "
-                                                    "tramo. Arrastra para pintar contactos."));
+                    item->setToolTip(QStringLiteral("Peine: clic izquierdo en la cabecera amplía el "
+                                                    "tramo. Botón derecho → Tamaño peine permite ampliarlo o "
+                                                    "reducirlo. Arrastra para pintar contactos."));
                 }
                 if (field == "color")
                 {
@@ -1561,81 +1598,160 @@ QToolTip { background:#102b3c; color:#eaf7ff; border:1px solid #5ad7f7; }
             }
             delete old;
         }
-        auto *form = new QFormLayout(configPage);
-        for (auto it = cfg.begin(); it != cfg.end(); ++it)
+        auto *sections = new QVBoxLayout(configPage);
+        const QVector<QPair<QString, QStringList>> groups{
+            {QStringLiteral("Representación"), {"enabled", "drawing_style"}},
+            {QStringLiteral("Geometría y disposición · Mixto"),
+             {"x_start", "y_base", "paso_x", "line_borna_len", "line_manguera_len", "line_dispositivo_len",
+              "draw_frame", "enable_multilevel"}},
+            {QStringLiteral("Textos y conexiones · lado interno"),
+             {"font_family_int", "font_size_int", "font_bold_int", "offset_int", "cable_text_offset_int",
+              "hose_text_offset_int"}},
+            {QStringLiteral("Textos y conexiones · lado externo"),
+             {"font_family_ext", "font_size_ext", "font_bold_ext", "offset_ext", "cable_text_offset_ext",
+              "hose_text_offset_ext"}},
+            {QStringLiteral("Mangueras"),
+             {"hose_group_mode", "hose_font_family", "hose_font_size", "hose_font_bold", "hose_delim"}},
+            {QStringLiteral("Bornas, niveles y reservas"),
+             {"borna_delim", "multilevel_sep", "reserve_count", "reserve_label_prefix",
+              "auto_detect_reserves"}},
+            {QStringLiteral("Conexiones, tierra y pantallas SHL"),
+             {"external_name_exceptions", "draw_ground_line", "draw_shield_symbol"}},
+            {QStringLiteral("Colores de bornas"),
+             {"enable_terminal_colors", "terminal_default_color", "terminal_color_rules_json"}},
+            {QStringLiteral("Compatibilidad con configuraciones anteriores"),
+             {"font_family", "char_adv_ext", "cable_line_len_ext", "cable_line_len_int", "hose_line_len_ext",
+              "hose_line_len_int", "terminal_color_gray_codes", "terminal_color_blue_codes",
+              "terminal_color_red_codes", "terminal_color_black_codes", "terminal_color_pe_codes"}},
+            {QStringLiteral("Exportación"), {"open_after_export"}}};
+        for (int groupIndex = 0; groupIndex < groups.size(); ++groupIndex)
         {
-            const auto k = it.key();
-            if (k == "dark_mode")
-                continue;
-            QWidget *field = nullptr;
-            if (it->isBool())
+            const auto &group = groups[groupIndex];
+            auto *box = new QGroupBox(group.first, configPage);
+            box->setObjectName("TBSettingsSection_" + QString::number(groupIndex));
+            sections->addWidget(box);
+            auto *form = new QFormLayout(box);
+            form->setFieldGrowthPolicy(QFormLayout::AllNonFixedFieldsGrow);
+            if (groupIndex == 0)
             {
-                auto *check = new QCheckBox(configPage);
-                check->setChecked(it->toBool());
-                connect(check, &QCheckBox::toggled, this,
-                        [this, k](bool v)
-                        {
-                            cfg[k] = v;
-                            configDirty = true;
-                            queueApply(300);
-                            if (k == "external_name_exceptions")
-                            {
-                                loadExceptions();
-                                refreshDraft();
-                            }
-                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
-                                     k == "enable_terminal_colors")
-                                decorate();
-                        });
-                field = check;
+                auto *hint = new QLabel(
+                    QStringLiteral(
+                        "Esquemático, Tornillo y Push-in usan la plantilla nativa de QET. Los ajustes de "
+                        "geometría y textos de esta ventana corresponden al estilo Mixto."),
+                    box);
+                hint->setWordWrap(true);
+                form->addRow(hint);
             }
-            else if (it->isDouble())
+            for (const auto &k : group.second)
             {
-                auto *spin = new QDoubleSpinBox(configPage);
-                spin->setRange(-100000, 100000);
-                spin->setDecimals(2);
-                spin->setValue(it->toDouble());
-                connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
-                        [this, k](double v)
-                        {
-                            cfg[k] = v;
-                            configDirty = true;
-                            queueApply(300);
-                            if (k == "external_name_exceptions")
+                auto it = cfg.constFind(k);
+                if (it == cfg.constEnd())
+                    continue;
+                QWidget *field = nullptr;
+                if (k == "drawing_style" || k == "hose_group_mode")
+                {
+                    auto *combo = new QComboBox(box);
+                    if (k == "drawing_style")
+                    {
+                        combo->addItem(QStringLiteral("Esquemático"), "schematic");
+                        combo->addItem(QStringLiteral("Tornillo"), "realistic_screw");
+                        combo->addItem(QStringLiteral("Push-in"), "realistic_push_in");
+                        combo->addItem(QStringLiteral("Mixto · GNerador_TB"), "mixed");
+                    }
+                    else
+                    {
+                        combo->addItem("Normal", "Normal");
+                        combo->addItem("Compacta", "Compacta");
+                    }
+                    combo->setCurrentIndex(qMax(0, combo->findData(it->toString())));
+                    connect(combo, qOverload<int>(&QComboBox::currentIndexChanged), this,
+                            [this, k, combo](int)
                             {
-                                loadExceptions();
-                                refreshDraft();
-                            }
-                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
-                                     k == "enable_terminal_colors")
-                                decorate();
-                        });
-                field = spin;
-            }
-            else
-            {
-                auto *line = new QLineEdit(it->toString(), configPage);
-                connect(line, &QLineEdit::textEdited, this,
-                        [this, k](const QString &v)
-                        {
-                            cfg[k] = v;
-                            configDirty = true;
-                            queueApply(300);
-                            if (k == "external_name_exceptions")
+                                cfg[k] = combo->currentData().toString();
+                                if (k == "drawing_style")
+                                {
+                                    cfg["enabled"] = true;
+                                    if (auto *check = configPage->findChild<QCheckBox *>("TBConfig_enabled"))
+                                    {
+                                        QSignalBlocker block(check);
+                                        check->setChecked(true);
+                                    }
+                                }
+                                configDirty = true;
+                                queueApply(300);
+                            });
+                    field = combo;
+                }
+                else if (it->isBool())
+                {
+                    auto *check = new QCheckBox(configPage);
+                    check->setChecked(it->toBool());
+                    connect(check, &QCheckBox::toggled, this,
+                            [this, k](bool v)
                             {
-                                loadExceptions();
-                                refreshDraft();
-                            }
-                            else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
-                                     k == "enable_terminal_colors")
-                                decorate();
-                        });
-                field = line;
+                                cfg[k] = v;
+                                configDirty = true;
+                                queueApply(300);
+                                if (k == "external_name_exceptions")
+                                {
+                                    loadExceptions();
+                                    refreshDraft();
+                                }
+                                else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                         k == "enable_terminal_colors")
+                                    decorate();
+                            });
+                    field = check;
+                }
+                else if (it->isDouble())
+                {
+                    auto *spin = new QDoubleSpinBox(configPage);
+                    spin->setRange(-100000, 100000);
+                    spin->setDecimals(2);
+                    spin->setValue(it->toDouble());
+                    connect(spin, qOverload<double>(&QDoubleSpinBox::valueChanged), this,
+                            [this, k](double v)
+                            {
+                                cfg[k] = v;
+                                configDirty = true;
+                                queueApply(300);
+                                if (k == "external_name_exceptions")
+                                {
+                                    loadExceptions();
+                                    refreshDraft();
+                                }
+                                else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                         k == "enable_terminal_colors")
+                                    decorate();
+                            });
+                    field = spin;
+                }
+                else
+                {
+                    auto *line = new QLineEdit(it->toString(), configPage);
+                    connect(line, &QLineEdit::textEdited, this,
+                            [this, k](const QString &v)
+                            {
+                                cfg[k] = v;
+                                configDirty = true;
+                                queueApply(300);
+                                if (k == "external_name_exceptions")
+                                {
+                                    loadExceptions();
+                                    refreshDraft();
+                                }
+                                else if (k.startsWith("terminal_color") || k == "terminal_default_color" ||
+                                         k == "enable_terminal_colors")
+                                    decorate();
+                            });
+                    field = line;
+                    field->setObjectName("TBConfig_" + k);
+                }
                 field->setObjectName("TBConfig_" + k);
+                form->addRow(captions.value(k, k), field);
             }
-            field->setObjectName("TBConfig_" + k);
-            form->addRow(captions.value(k, k), field);
         }
+        sections->addStretch();
     }
     void filter()
     {
